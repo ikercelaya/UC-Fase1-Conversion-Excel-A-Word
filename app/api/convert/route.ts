@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseWorkbook } from "@/lib/excel";
-import { buildReport } from "@/lib/word";
+import { extractRadonSamples, parseWorkbook, RadonData, WorkbookData } from "@/lib/excel";
+import { buildRadonReport, buildReport } from "@/lib/word";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -44,9 +44,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let workbook;
+  // Extracción específica del formato del laboratorio (radón); si el archivo
+  // no tiene ese formato, se vuelca el contenido completo de todas las hojas.
+  let radon: RadonData | null = null;
+  let workbook: WorkbookData | null = null;
   try {
-    workbook = parseWorkbook(Buffer.from(await file.arrayBuffer()));
+    const buffer = Buffer.from(await file.arrayBuffer());
+    radon = extractRadonSamples(buffer);
+    if (!radon) workbook = parseWorkbook(buffer);
   } catch {
     return NextResponse.json(
       { error: "No se pudo leer el archivo. Comprueba que es un Excel válido y sin contraseña." },
@@ -54,7 +59,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (workbook.sheets.length === 0) {
+  if (!radon && (!workbook || workbook.sheets.length === 0)) {
     return NextResponse.json(
       { error: "El archivo no contiene ninguna hoja." },
       { status: 422 },
@@ -62,11 +67,18 @@ export async function POST(request: NextRequest) {
   }
 
   const generatedAt = new Date();
-  const docxBuffer = await buildReport({
-    data: workbook,
-    sourceFileName: file.name,
-    generatedAt,
-  });
+  const docxBuffer = radon
+    ? await buildRadonReport({
+        data: radon,
+        sourceFileName: file.name,
+        generatedAt,
+        reportNumber: extractReportNumber(file.name),
+      })
+    : await buildReport({
+        data: workbook!,
+        sourceFileName: file.name,
+        generatedAt,
+      });
   const fileName = buildFileName(file.name, generatedAt);
 
   return new NextResponse(new Uint8Array(docxBuffer), {
@@ -75,8 +87,16 @@ export async function POST(request: NextRequest) {
       "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "Content-Disposition": `attachment; filename="${fileName}"`,
       "Cache-Control": "no-store",
+      "X-Report-Mode": radon ? "radon" : "volcado",
+      "X-Sample-Count": String(radon ? radon.samples.length : 0),
     },
   });
+}
+
+/** Nº de informe del laboratorio: dígitos iniciales del nombre del archivo (p. ej. "26024 (...)" → 26024). */
+function extractReportNumber(name: string): string {
+  const match = name.trim().match(/^(\d{3,6})/);
+  return match ? match[1] : "";
 }
 
 /** Nombre del informe: Informe_<archivo>_<fecha>_<hora>.docx (hora peninsular). */

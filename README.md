@@ -1,24 +1,40 @@
-# UC · Fase 1 — Conversión de Excel a Word
+# UC — Conversión de Excel a Word (informes de radón LaRUC)
 
-Herramienta web para la Universidad de Cantabria que convierte archivos Excel en
-informes Word. Sustituye el proceso manual de copiar y pegar datos entre
-documentos: se sube el Excel, se extrae todo su contenido y se descarga un
-documento Word con formato corporativo.
+Herramienta web para la Universidad de Cantabria que convierte los Excel de
+medidas del Laboratorio de Radiactividad Ambiental (LaRUC) en informes Word.
+Sustituye el proceso manual de copiar y pegar datos entre documentos: se sube
+el Excel, se extraen los resultados de cada detector y se descarga un documento
+Word con formato corporativo.
 
 ## Qué hace
 
 1. El usuario sube un archivo **`.xlsx`, `.xls`, `.xlsm` o `.csv`** desde la web.
-2. El servidor lee **todas las hojas** del libro y extrae los valores tal y como
-   se muestran en Excel (respetando el formato visible de fechas e importes).
+2. El servidor busca los bloques **"RESULTADOS PARA INFORME"** (hoja
+   `Resultados`): por cada detector extrae ID, fechas de colocación y retirada,
+   exposición, concentración, incertidumbres (k=2) y límites de detección.
+   Los huecos sin detector (ID `0`) se descartan.
 3. Genera un documento **Word (.docx)** con:
    - Logo de la UC en la cabecera de todas las páginas y pie con numeración.
-   - Portada con metadatos: archivo de origen, fecha y hora de generación,
-     hojas procesadas y filas totales.
-   - Una sección por hoja con su tabla de datos completa (encabezado corporativo,
-     filas alternas sombreadas, valores numéricos alineados a la derecha).
-   - Orientación horizontal automática si alguna hoja tiene 7 columnas o más.
+   - Portada con metadatos: archivo de origen, nº de informe, fecha y hora de
+     generación y nº de detectores, más las notas (1) y (2) del laboratorio.
+   - **Una tabla por detector** con la misma estructura que el informe de
+     ensayo del laboratorio: PROCEDENCIA, REFERENCIA, REFERENCIA UC, fechas,
+     exposición/concentración con incertidumbre y L.D., con superíndices
+     (kBq m⁻³ h, Bq m⁻³).
 4. El nombre del archivo incluye fecha y hora de generación (hora peninsular):
    `Informe_<archivo>_AAAA-MM-DD_HH-MM-SS.docx`.
+
+Campos derivados o no disponibles:
+
+- **REFERENCIA UC** se genera con el patrón del laboratorio
+  `P-<nº informe>-TRA-<n>` (secuencial). El nº de informe se toma de los
+  dígitos iniciales del nombre del archivo (`26024 (…).xlsx` → `26024`);
+  si el nombre no empieza por dígitos, el campo queda en blanco.
+- **PROCEDENCIA** no existe en el Excel de medidas y se deja en blanco.
+
+Si el archivo no tiene el formato del laboratorio, la herramienta hace un
+**volcado completo**: una sección por hoja con todos sus datos en tablas
+(valores tal y como se muestran en Excel).
 
 El archivo se procesa **en memoria** y no se almacena en el servidor.
 
@@ -37,8 +53,8 @@ app/
   globals.css           Estilos (minimalista, color corporativo UC)
   api/convert/route.ts  Endpoint POST: Excel → Word
 lib/
-  excel.ts              Extracción y normalización de los datos del Excel
-  word.ts               Construcción del informe Word
+  excel.ts              Extracción: bloques de radón (LaRUC) y volcado completo
+  word.ts               Construcción de los informes Word (radón y volcado)
   ucLogo.ts             Logo incrustado en base64 (generado, no editar a mano)
 public/
   uc-logo.png           Logo mostrado en la web (provisional)
@@ -46,6 +62,7 @@ scripts/
   make-logo.py          Genera el logo provisional (Pillow)
   embed-logo.mjs        Incrusta public/uc-logo.png en lib/ucLogo.ts
   make-sample.mjs       Crea samples/ejemplo.xlsx para pruebas
+  inspect-excel.mjs     Inspector: imprime hojas y contenido de un Excel
 samples/
   ejemplo.xlsx          Excel de ejemplo con varias hojas
 ```
@@ -82,19 +99,21 @@ Cuando tengas el logotipo oficial (PNG, idealmente con fondo transparente):
    se incrusta en el Word).
 3. Haz commit de ambos archivos.
 
-## Límites actuales (Fase 1)
+## Límites actuales
 
 | Límite | Valor | Motivo |
 |---|---|---|
 | Tamaño del Excel | 4 MB | Vercel limita el cuerpo de la petición a 4,5 MB |
-| Filas por hoja en el Word | 2 000 | Tiempo y memoria de la función serverless (se indica en el informe si se recorta) |
-| Caracteres por celda | 500 | Legibilidad del documento |
+| Filas por hoja en el volcado | 2 000 | Tiempo y memoria de la función serverless (se indica en el informe si se recorta) |
+| Caracteres por celda (volcado) | 500 | Legibilidad del documento |
 
 Los límites son constantes configurables en `lib/excel.ts` y
 `app/api/convert/route.ts`.
 
-## Próximos pasos (Fase 2)
+## Pendiente
 
-- Extracción de los datos específicos que se definan (métricas, análisis…)
-  en lugar del volcado completo.
-- Plantilla del informe final con las secciones definitivas.
+- Campo PROCEDENCIA (no está en el Excel de medidas; habría que aportarlo de
+  otra fuente o introducirlo en la web).
+- Texto introductorio del informe de ensayo (datos del cliente, método,
+  acreditación…), si se quiere replicar el informe completo del laboratorio.
+- Logo oficial de la UC (ver «Sustituir el logo provisional»).

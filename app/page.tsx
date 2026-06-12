@@ -64,6 +64,8 @@ export default function Home() {
       const disposition = res.headers.get("Content-Disposition") ?? "";
       const match = disposition.match(/filename="?([^";]+)"?/i);
       const name = match?.[1] ?? "Informe.docx";
+      const mode = res.headers.get("X-Report-Mode");
+      const sampleCount = res.headers.get("X-Sample-Count");
 
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
@@ -75,7 +77,13 @@ export default function Home() {
       URL.revokeObjectURL(url);
 
       setStatus("done");
-      setMessage(`Informe descargado: ${name}`);
+      const detail =
+        mode === "radon"
+          ? ` — ${sampleCount} detectores extraídos`
+          : mode === "volcado"
+            ? " — el archivo no tiene el formato del laboratorio; se ha volcado todo su contenido"
+            : "";
+      setMessage(`Informe descargado: ${name}${detail}`);
     } catch (error) {
       setStatus("error");
       setMessage(
@@ -94,8 +102,9 @@ export default function Home() {
       <main className="wrap">
         <h1>Genera un informe Word a partir de un Excel</h1>
         <p className="lead">
-          Sube un archivo Excel y se creará un documento Word con todos sus datos en
-          tablas, listo para descargar.
+          Sube el Excel de medidas y se creará un documento Word con la tabla de
+          resultados de cada detector. Si el archivo no tiene el formato del
+          laboratorio, se volcará todo su contenido en tablas.
         </p>
 
         <section

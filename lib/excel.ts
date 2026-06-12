@@ -91,3 +91,191 @@ function toCellText(value: unknown): string {
   text = text.replace(/\r\n/g, "\n").replace(CONTROL_CHARS, "").trim();
   return text.length > MAX_CELL_CHARS ? `${text.slice(0, MAX_CELL_CHARS)}…` : text;
 }
+
+// ---------------------------------------------------------------------------
+// Extracción específica del formato LaRUC (informes de radón)
+//
+// Los Excel del laboratorio tienen una hoja "Resultados" con bloques
+// "RESULTADOS PARA INFORME" por cada slide: ID, DÍA INICIAL, DÍA FINAL,
+// EXPOSICION, u(EXP), LD EXPOSICION, CONCENTRACION, u(CONC), LD CONCENTRACION.
+// Esos son exactamente los valores que aparecen en la tabla de cada detector
+// del informe de ensayo.
+// ---------------------------------------------------------------------------
+
+/** Identificador de detector, p. ej. HK3287 o HH8401. Excluye huecos ("0"). */
+const DETECTOR_ID = /^[A-Za-z]{1,4}\d{2,6}$/;
+
+export interface RadonSample {
+  id: string;
+  /** Bloque del que procede (p. ej. "SLIDE 1"), informativo. */
+  slide: string;
+  fechaColocacion: string;
+  fechaRetirada: string;
+  exposicion: string;
+  incertidumbreExposicion: string;
+  ldExposicion: string;
+  concentracion: string;
+  incertidumbreConcentracion: string;
+  ldConcentracion: string;
+}
+
+export interface RadonData {
+  sheetName: string;
+  samples: RadonSample[];
+}
+
+interface ColumnMap {
+  id: number;
+  diaInicial: number;
+  diaFinal: number;
+  exposicion: number;
+  uExp: number;
+  ldExp: number;
+  concentracion: number;
+  uConc: number;
+  ldConc: number;
+}
+
+/**
+ * Busca en el libro los bloques de resultados de detectores de radón.
+ * Devuelve null si el archivo no tiene ese formato.
+ */
+export function extractRadonSamples(buffer: Buffer): RadonData | null {
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+
+  // La hoja "Resultados" tiene prioridad: su bloque "RESULTADOS PARA INFORME"
+  // contiene los L.D. del informe (otras hojas tienen valores intermedios).
+  const names = [...workbook.SheetNames].sort(
+    (a, b) => sheetPriority(b) - sheetPriority(a),
+  );
+
+  for (const name of names) {
+    const worksheet = workbook.Sheets[name];
+    if (!worksheet || !worksheet["!ref"]) continue;
+
+    // Dos pasadas alineadas fila a fila: texto formateado y valores crudos
+    // (las fechas llegan como Date en la pasada cruda).
+    const formatted = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+      header: 1,
+      raw: false,
+      defval: "",
+      blankrows: true,
+    });
+    const raw = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+      header: 1,
+      raw: true,
+      defval: null,
+      blankrows: true,
+    });
+
+    const samples: RadonSample[] = [];
+    let columns: ColumnMap | null = null;
+    let slide = "";
+
+    for (let r = 0; r < formatted.length; r++) {
+      const row = (formatted[r] ?? []).map((cell) => String(cell ?? "").trim());
+
+      const headerColumns = findColumns(row);
+      if (headerColumns) {
+        columns = headerColumns;
+        slide = row.find((cell) => /^SLIDE/i.test(cell)) ?? slide;
+        continue;
+      }
+      if (!columns) continue;
+
+      const id = row[columns.id] ?? "";
+      if (!DETECTOR_ID.test(id)) continue;
+
+      const rawRow = raw[r] ?? [];
+      const text = (index: number) => (index >= 0 ? (row[index] ?? "") : "");
+      const fecha = (index: number) =>
+        index >= 0 ? formatFecha(rawRow[index], row[index] ?? "") : "";
+
+      samples.push({
+        id,
+        slide,
+        fechaColocacion: fecha(columns.diaInicial),
+        fechaRetirada: fecha(columns.diaFinal),
+        exposicion: text(columns.exposicion),
+        incertidumbreExposicion: text(columns.uExp),
+        ldExposicion: text(columns.ldExp),
+        concentracion: text(columns.concentracion),
+        incertidumbreConcentracion: text(columns.uConc),
+        ldConcentracion: text(columns.ldConc),
+      });
+    }
+
+    if (samples.length > 0) {
+      return { sheetName: name, samples };
+    }
+  }
+
+  return null;
+}
+
+function sheetPriority(name: string): number {
+  return /resultado/i.test(name) ? 1 : 0;
+}
+
+/** Quita acentos, colapsa espacios y pasa a mayúsculas para comparar encabezados. */
+function normalizeHeader(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(new RegExp("[\\u0300-\\u036f]", "g"), "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toUpperCase();
+}
+
+/**
+ * Detecta una fila de encabezado del bloque de resultados. Las columnas se
+ * buscan a partir de la columna ID para ignorar bloques auxiliares que
+ * comparten fila (p. ej. "RESULTADOS HOJA DE CÁLCULO" a la izquierda).
+ */
+function findColumns(row: string[]): ColumnMap | null {
+  const headers = row.map(normalizeHeader);
+  const idIndex = headers.findIndex((header) => header === "ID");
+  if (idIndex < 0) return null;
+
+  const after = (predicate: (header: string) => boolean) => {
+    for (let i = idIndex + 1; i < headers.length; i++) {
+      if (predicate(headers[i])) return i;
+    }
+    return -1;
+  };
+
+  const map: ColumnMap = {
+    id: idIndex,
+    diaInicial: after((h) => h.startsWith("DIA INICIAL")),
+    diaFinal: after((h) => h.startsWith("DIA FINAL")),
+    exposicion: after((h) => h.startsWith("EXPOSICION")),
+    uExp: after((h) => h.startsWith("U(EXP)")),
+    ldExp: after((h) => h.startsWith("LD EXPOSICION")),
+    concentracion: after((h) => h.startsWith("CONCENTRACION")),
+    uConc: after((h) => h.startsWith("U(CONC)")),
+    ldConc: after((h) => h.startsWith("LD CONCENTRACION")),
+  };
+
+  // Imprescindibles para considerar la fila un encabezado de resultados.
+  if (map.diaInicial < 0 || map.exposicion < 0 || map.concentracion < 0) {
+    return null;
+  }
+  return map;
+}
+
+/** Devuelve la fecha en formato dd/mm/aaaa a partir del valor crudo o del texto. */
+function formatFecha(rawValue: unknown, formattedValue: string): string {
+  if (rawValue instanceof Date && !Number.isNaN(rawValue.getTime())) {
+    const day = String(rawValue.getDate()).padStart(2, "0");
+    const month = String(rawValue.getMonth() + 1).padStart(2, "0");
+    return `${day}/${month}/${rawValue.getFullYear()}`;
+  }
+  const text = formattedValue.trim();
+  const match = text.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+  if (match) {
+    const [, day, month, year] = match;
+    const fullYear = year.length === 2 ? `20${year}` : year;
+    return `${day.padStart(2, "0")}/${month.padStart(2, "0")}/${fullYear}`;
+  }
+  return text;
+}

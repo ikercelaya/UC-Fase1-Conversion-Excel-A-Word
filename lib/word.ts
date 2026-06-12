@@ -16,9 +16,10 @@ import {
   TableLayoutType,
   TableRow,
   TextRun,
+  VerticalAlign,
   WidthType,
 } from "docx";
-import { MAX_ROWS_PER_SHEET, SheetData, WorkbookData } from "./excel";
+import { MAX_ROWS_PER_SHEET, RadonData, RadonSample, SheetData, WorkbookData } from "./excel";
 import { UC_LOGO_BASE64, UC_LOGO_NATURAL } from "./ucLogo";
 
 // Paleta corporativa (coherente con la interfaz web)
@@ -47,7 +48,34 @@ export interface ReportInput {
   generatedAt: Date;
 }
 
-/** Construye el informe Word y lo devuelve como buffer .docx. */
+/** Estilos comunes a todos los informes. */
+function documentStyles() {
+  return {
+    default: {
+      document: {
+        run: { font: "Calibri", size: 21, color: INK }, // 10,5 pt
+      },
+      heading1: {
+        run: { font: "Calibri", size: 26, bold: true, color: UC_TEAL },
+        paragraph: { spacing: { before: 240, after: 120 } },
+      },
+    },
+  };
+}
+
+/** Configuración de página A4 con la cabecera y márgenes corporativos. */
+function pageProperties(landscape: boolean) {
+  return {
+    page: {
+      size: landscape
+        ? { width: A4_PORTRAIT.height, height: A4_PORTRAIT.width, orientation: PageOrientation.LANDSCAPE }
+        : { width: A4_PORTRAIT.width, height: A4_PORTRAIT.height, orientation: PageOrientation.PORTRAIT },
+      margin: { top: 1700, bottom: 1100, left: 1000, right: 1000, header: 500, footer: 400 },
+    },
+  };
+}
+
+/** Construye el informe de volcado completo y lo devuelve como buffer .docx. */
 export async function buildReport({ data, sourceFileName, generatedAt }: ReportInput): Promise<Buffer> {
   const landscape = data.sheets.some((sheet) => sheet.columnCount >= LANDSCAPE_COLUMN_THRESHOLD);
 
@@ -55,27 +83,10 @@ export async function buildReport({ data, sourceFileName, generatedAt }: ReportI
     creator: "Universidad de Cantabria",
     title: `Informe de datos — ${sourceFileName}`,
     description: "Informe generado automáticamente a partir de un archivo Excel",
-    styles: {
-      default: {
-        document: {
-          run: { font: "Calibri", size: 21, color: INK }, // 10,5 pt
-        },
-        heading1: {
-          run: { font: "Calibri", size: 26, bold: true, color: UC_TEAL },
-          paragraph: { spacing: { before: 240, after: 120 } },
-        },
-      },
-    },
+    styles: documentStyles(),
     sections: [
       {
-        properties: {
-          page: {
-            size: landscape
-              ? { width: A4_PORTRAIT.height, height: A4_PORTRAIT.width, orientation: PageOrientation.LANDSCAPE }
-              : { width: A4_PORTRAIT.width, height: A4_PORTRAIT.height, orientation: PageOrientation.PORTRAIT },
-            margin: { top: 1700, bottom: 1100, left: 1000, right: 1000, header: 500, footer: 400 },
-          },
-        },
+        properties: pageProperties(landscape),
         headers: { default: buildHeader() },
         footers: { default: buildFooter() },
         children: [
@@ -297,4 +308,269 @@ function buildCellParagraphs(text: string): Paragraph[] {
         children: [new TextRun({ text: line, size: 18 })],
       }),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Informe de ensayo de radón (tabla por detector, formato del laboratorio)
+// ---------------------------------------------------------------------------
+
+export interface RadonReportInput {
+  data: RadonData;
+  sourceFileName: string;
+  generatedAt: Date;
+  /** Nº de informe derivado del nombre del archivo ("" si no se pudo). */
+  reportNumber: string;
+}
+
+// Anchos de columna del informe original del laboratorio (twips).
+const RADON_COLUMNS = [2345, 1985, 2058, 3137];
+const RADON_TABLE_WIDTH = RADON_COLUMNS.reduce((sum, width) => sum + width, 0);
+const RADON_VALUE_SPAN_WIDTH = RADON_COLUMNS[1] + RADON_COLUMNS[2] + RADON_COLUMNS[3];
+
+/** Construye el informe de ensayo de radón y lo devuelve como buffer .docx. */
+export async function buildRadonReport({
+  data,
+  sourceFileName,
+  generatedAt,
+  reportNumber,
+}: RadonReportInput): Promise<Buffer> {
+  const document = new Document({
+    creator: "Universidad de Cantabria",
+    title: `Informe de ensayo — ${sourceFileName}`,
+    description: "Informe de ensayo generado automáticamente a partir del Excel de medidas",
+    styles: documentStyles(),
+    sections: [
+      {
+        properties: pageProperties(false),
+        headers: { default: buildHeader() },
+        footers: { default: buildFooter() },
+        children: [
+          ...buildRadonCover(sourceFileName, generatedAt, data, reportNumber),
+          new Paragraph({
+            heading: HeadingLevel.HEADING_1,
+            children: [new TextRun("Resultados por detector")],
+          }),
+          ...buildRadonLegend(),
+          ...data.samples.flatMap((sample, index) => [
+            buildSampleTable(sample, referenciaUC(reportNumber, index + 1)),
+            // separador: evita que Word funda tablas consecutivas
+            new Paragraph({ spacing: { before: 60, after: 60 }, children: [] }),
+          ]),
+        ],
+      },
+    ],
+  });
+
+  return Packer.toBuffer(document);
+}
+
+/** REFERENCIA UC secuencial (P-<informe>-TRA-<n>), como en los informes del laboratorio. */
+function referenciaUC(reportNumber: string, position: number): string {
+  return reportNumber ? `P-${reportNumber}-TRA-${position}` : "";
+}
+
+function buildRadonCover(
+  sourceFileName: string,
+  generatedAt: Date,
+  data: RadonData,
+  reportNumber: string,
+): Paragraph[] {
+  const formattedDate = new Intl.DateTimeFormat("es-ES", {
+    dateStyle: "long",
+    timeStyle: "medium",
+    timeZone: "Europe/Madrid",
+  }).format(generatedAt);
+
+  const metadata: Array<[string, string]> = [
+    ["Archivo de origen", sourceFileName],
+    ...(reportNumber ? ([["Nº de informe", reportNumber]] as Array<[string, string]>) : []),
+    ["Fecha de generación", formattedDate],
+    ["Hoja de origen", data.sheetName],
+    ["Detectores procesados", data.samples.length.toLocaleString("es-ES")],
+  ];
+
+  return [
+    new Paragraph({
+      spacing: { before: 120, after: 60 },
+      children: [new TextRun({ text: "Informe de ensayo", size: 52, bold: true, color: INK })],
+    }),
+    new Paragraph({
+      spacing: { after: 280 },
+      children: [
+        new TextRun({
+          text: "Determinación de la exposición a radón en aire",
+          size: 22,
+          color: MUTED,
+        }),
+      ],
+    }),
+    ...metadata.map(
+      ([label, value]) =>
+        new Paragraph({
+          spacing: { after: 40 },
+          children: [
+            new TextRun({ text: `${label}:  `, bold: true }),
+            new TextRun({ text: value }),
+          ],
+        }),
+    ),
+  ];
+}
+
+/** Notas (1) y (2) del informe original más el aviso de campos no disponibles. */
+function buildRadonLegend(): Paragraph[] {
+  const note = (marker: string, text: string) =>
+    new Paragraph({
+      spacing: { after: 40 },
+      children: [
+        new TextRun({ text: marker, superScript: true, size: 18, color: MUTED }),
+        new TextRun({ text: ` ${text}`, size: 18, color: MUTED }),
+      ],
+    });
+
+  return [
+    note("(1)", "La información ha sido proporcionada por el cliente."),
+    note(
+      "(2)",
+      "El resultado de la concentración se ha calculado según las fechas de exposición facilitadas por el cliente.",
+    ),
+    new Paragraph({
+      spacing: { after: 200 },
+      children: [
+        new TextRun({
+          text: "El campo PROCEDENCIA no está disponible en el archivo Excel y se deja en blanco.",
+          italics: true,
+          size: 18,
+          color: MUTED,
+        }),
+      ],
+    }),
+  ];
+}
+
+/** Tabla de un detector con la misma estructura que el informe del laboratorio. */
+function buildSampleTable(sample: RadonSample, refUC: string): Table {
+  return new Table({
+    width: { size: RADON_TABLE_WIDTH, type: WidthType.DXA },
+    columnWidths: RADON_COLUMNS,
+    layout: TableLayoutType.FIXED,
+    margins: { top: 60, bottom: 60, left: 100, right: 100 },
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      bottom: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      left: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      right: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      insideVertical: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+    },
+    rows: [
+      labelValueRow("PROCEDENCIA", [], true),
+      labelValueRow("REFERENCIA", [new TextRun(sample.id)], true),
+      labelValueRow("REFERENCIA UC", refUC ? [new TextRun(refUC)] : [], true),
+      labelValueRow("FECHA COLOCACIÓN", clientDataRuns(sample.fechaColocacion), true),
+      labelValueRow("FECHA RETIRADA", clientDataRuns(sample.fechaRetirada), true),
+      pairRow(
+        ["EXPOSICIÓN", expUnitRuns()],
+        sample.exposicion,
+        ["CONCENTRACIÓN", concUnitRuns()],
+        sample.concentracion,
+        true,
+      ),
+      pairRow(
+        ["INCERTIDUMBRE", expUnitRuns()],
+        sample.incertidumbreExposicion,
+        ["INCERTIDUMBRE", concUnitRuns()],
+        sample.incertidumbreConcentracion,
+        true,
+      ),
+      pairRow(
+        ["L.D.", expUnitRuns()],
+        sample.ldExposicion,
+        ["L.D.", concUnitRuns()],
+        sample.ldConcentracion,
+        false,
+      ),
+    ],
+  });
+}
+
+function sup(text: string): TextRun {
+  return new TextRun({ text, superScript: true });
+}
+
+/** Unidades de exposición: (kBq m⁻³ h). */
+function expUnitRuns(): TextRun[] {
+  return [new TextRun("(kBq m"), sup("-3"), new TextRun(" h)")];
+}
+
+/** Unidades de concentración: (Bq m⁻³) ⁽²⁾. */
+function concUnitRuns(): TextRun[] {
+  return [new TextRun("(Bq m"), sup("-3"), new TextRun(") "), sup("(2)")];
+}
+
+/** Valor aportado por el cliente: añade la nota superíndice (1) si hay valor. */
+function clientDataRuns(value: string): TextRun[] {
+  return value ? [new TextRun(`${value} `), sup("(1)")] : [];
+}
+
+function radonParagraph(
+  runs: TextRun[],
+  alignment: (typeof AlignmentType)[keyof typeof AlignmentType],
+  keepNext: boolean,
+): Paragraph {
+  return new Paragraph({ alignment, keepNext, children: runs });
+}
+
+function radonCell(paragraphs: Paragraph[], width: number, span?: number): TableCell {
+  return new TableCell({
+    width: { size: width, type: WidthType.DXA },
+    columnSpan: span,
+    verticalAlign: VerticalAlign.CENTER,
+    children: paragraphs,
+  });
+}
+
+/** Fila "etiqueta | valor" (el valor ocupa las tres columnas restantes). */
+function labelValueRow(label: string, valueRuns: TextRun[], keepNext: boolean): TableRow {
+  return new TableRow({
+    cantSplit: true,
+    children: [
+      radonCell([radonParagraph([new TextRun(label)], AlignmentType.LEFT, keepNext)], RADON_COLUMNS[0]),
+      radonCell(
+        [radonParagraph(valueRuns, AlignmentType.CENTER, keepNext)],
+        RADON_VALUE_SPAN_WIDTH,
+        3,
+      ),
+    ],
+  });
+}
+
+/** Fila doble "magnitud exposición | valor | magnitud concentración | valor". */
+function pairRow(
+  [labelLeft, unitsLeft]: [string, TextRun[]],
+  valueLeft: string,
+  [labelRight, unitsRight]: [string, TextRun[]],
+  valueRight: string,
+  keepNext: boolean,
+): TableRow {
+  const labelCell = (label: string, units: TextRun[], width: number) =>
+    radonCell(
+      [
+        radonParagraph([new TextRun(label)], AlignmentType.LEFT, true),
+        radonParagraph(units, AlignmentType.LEFT, keepNext),
+      ],
+      width,
+    );
+  const valueCell = (value: string, width: number) =>
+    radonCell([radonParagraph(value ? [new TextRun(value)] : [], AlignmentType.CENTER, keepNext)], width);
+
+  return new TableRow({
+    cantSplit: true,
+    children: [
+      labelCell(labelLeft, unitsLeft, RADON_COLUMNS[0]),
+      valueCell(valueLeft, RADON_COLUMNS[1]),
+      labelCell(labelRight, unitsRight, RADON_COLUMNS[2]),
+      valueCell(valueRight, RADON_COLUMNS[3]),
+    ],
+  });
 }
