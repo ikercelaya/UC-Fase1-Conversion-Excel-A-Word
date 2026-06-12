@@ -63,6 +63,9 @@ scripts/
   embed-logo.mjs        Incrusta public/uc-logo.png en lib/ucLogo.ts
   make-sample.mjs       Crea samples/ejemplo.xlsx para pruebas
   inspect-excel.mjs     Inspector: imprime hojas y contenido de un Excel
+  make-guia.mjs         Genera docs/Guia-de-uso.docx (guía para el cliente)
+docs/
+  Guia-de-uso.docx      Guía de uso para entregar al cliente (generada)
 samples/
   ejemplo.xlsx          Excel de ejemplo con varias hojas
 ```
@@ -80,6 +83,13 @@ Para probar sin interfaz:
 npm run sample     # crea samples/ejemplo.xlsx
 curl -F "file=@samples/ejemplo.xlsx" -o informe.docx http://localhost:3000/api/convert
 ```
+
+## Guía de uso para el cliente
+
+En `docs/Guia-de-uso.docx` hay una guía lista para entregar (acceso, pasos,
+contenido del informe, requisitos del Excel y solución de problemas). Se genera
+con `node scripts/make-guia.mjs`; antes de entregarla, revisa en ese script la
+URL de la aplicación y el contacto de soporte, y vuelve a ejecutarlo.
 
 ## Despliegue en Vercel
 

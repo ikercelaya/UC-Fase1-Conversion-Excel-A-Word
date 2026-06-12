@@ -17,5 +17,6 @@ next-env.d.ts
 .DS_Store
 Thumbs.db
 
-# salidas locales de prueba
+# salidas locales de prueba (la guía de docs/ sí se versiona)
 *.docx
+!docs/*.docx
