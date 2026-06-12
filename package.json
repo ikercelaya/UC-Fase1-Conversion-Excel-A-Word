@@ -1,0 +1,29 @@
+{
+  "name": "uc-fase1-conversion-excel-a-word",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Universidad de Cantabria · Fase 1: conversión de archivos Excel a informes Word",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "embed-logo": "node scripts/embed-logo.mjs",
+    "sample": "node scripts/make-sample.mjs"
+  },
+  "dependencies": {
+    "docx": "^9.5.0",
+    "next": "^15.5.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

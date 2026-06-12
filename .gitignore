@@ -1,0 +1,21 @@
+# dependencias
+/node_modules
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+*.tsbuildinfo
+
+# vercel
+.vercel
+
+# configuración local de Claude Code
+.claude/
+
+# sistema
+.DS_Store
+Thumbs.db
+
+# salidas locales de prueba
+*.docx
