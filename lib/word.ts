@@ -5,6 +5,7 @@ import {
   Footer,
   Header,
   HeadingLevel,
+  HeightRule,
   ImageRun,
   ISectionOptions,
   PageNumber,
@@ -54,8 +55,6 @@ const LAB_DEPT_LINES = [
 ];
 const ENSAYO_OBJETO =
   "Exposición y concentración de gas radón en aire a través de los análisis llevados a cabo en el Laboratorio de Radiactividad de la Universidad de Cantabria.";
-const METODO_EMPLEADO =
-  "El método empleado ha sido el que se recoge en la documentación de calidad del laboratorio referencia I-Ens01_10.";
 const ACREDITACION =
   "Laboratorio de ensayo acreditado por ENAC con acreditación Nº 1204/LE2219";
 const FOOTER_LINE_1 =
@@ -145,7 +144,10 @@ function buildRadonSection(file: CombinedReportFile): ISectionOptions {
     headers: { default: buildHeader(file.reportNumber) },
     footers: { default: buildFooter() },
     children: [
-      ...buildCoverPage(samples.length),
+      // Página 1: solo el título (portada). El resto va en la página 2.
+      ...buildTitlePage(),
+      // Página 2 en adelante: datos del informe, tablas y cierre con firma.
+      ...buildDataPage(),
       ...buildResultsIntro(),
       ...samples.flatMap((sample, index) => [
         buildSampleTable(sample, referenciaUC(file.reportNumber, index + 1)),
@@ -283,24 +285,45 @@ function buildFooter(): Footer {
   });
 }
 
-/** Primera página del informe: título y secciones de datos (datos del cliente en blanco). */
-function buildCoverPage(detectorCount: number): Paragraph[] {
+/** Página 1: portada con solo el título (centrado), debajo de la cabecera. */
+function buildTitlePage(): Paragraph[] {
   return [
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { before: 0, after: 40 },
+      spacing: { before: 1400, after: 80 },
       children: [new TextRun({ text: "INFORME DE ENSAYO", bold: true, size: 36, color: INK })],
     }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      spacing: { after: 220 },
-      border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: LINE, space: 6 } },
+      spacing: { after: 0 },
       children: [
         new TextRun({
           text: "DETERMINACIÓN DE LA CONCENTRACIÓN DE RADÓN EN AIRE",
           bold: true,
           size: 24,
           color: UC_TEAL,
+        }),
+      ],
+    }),
+  ];
+}
+
+/**
+ * Página 2: datos del informe siguiendo la plantilla del laboratorio. Los datos
+ * del cliente y de las muestras se dejan en blanco para rellenarlos a mano;
+ * solo se incluyen los textos fijos de la plantilla.
+ */
+function buildDataPage(): Paragraph[] {
+  return [
+    new Paragraph({
+      pageBreakBefore: true, // empieza en una página nueva (la 2)
+      spacing: { after: 160 },
+      children: [
+        new TextRun({
+          text: "DETERMINACIÓN DE LA CONCENTRACIÓN DE RADÓN EN AIRE.",
+          bold: true,
+          size: 22,
+          color: INK,
         }),
       ],
     }),
@@ -314,7 +337,7 @@ function buildCoverPage(detectorCount: number): Paragraph[] {
 
     sectionHeading("Objeto del informe"),
     bulletItem("Ensayo a realizar:", ENSAYO_OBJETO),
-    bulletItem("Nº de detectores:", String(detectorCount)),
+    bulletItem("Nº de detectores:"),
     bulletItem("Nº de medidas realizadas:"),
 
     sectionHeading("Datos de las muestras objeto del ensayo"),
@@ -329,14 +352,14 @@ function buildCoverPage(detectorCount: number): Paragraph[] {
     bulletItem("Fecha final ensayo:"),
 
     sectionHeading("Método de ensayo"),
-    bulletItem("Lugar de realización del ensayo:", "Instalaciones de LaRUC"),
-    bulletItem("Método de ensayo empleado:", METODO_EMPLEADO),
+    bulletItem("Lugar de realización del ensayo:"),
+    bulletItem("Método de ensayo empleado:"),
 
     sectionHeading("Normativa que afecta a este ensayo"),
-    bulletItem("ISO 11665-4"),
+    plainItem("ISO 11665-4"),
 
     sectionHeading("Incidencias durante la captación, retirada, transporte y/o ensayo"),
-    bulletItem(""),
+    plainItem("No aplica."),
 
     new Paragraph({
       spacing: { before: 160, after: 80 },
@@ -376,19 +399,39 @@ function buildResultsIntro(): Paragraph[] {
   ];
 }
 
-/** Cierre del informe y espacio para fecha de emisión y firma. */
-function buildClosing(): Paragraph[] {
+/** Cierre del informe: "Fin del informe", la línea de firma y el recuadro vacío. */
+function buildClosing(): (Paragraph | Table)[] {
   return [
-    new Paragraph({
-      spacing: { before: 240, after: 60 },
-      children: [new TextRun({ text: "Fin del informe", bold: true })],
-    }),
-    new Paragraph({
-      spacing: { before: 120, after: 0 },
-      children: [new TextRun({ text: "Fecha de emisión y firma (Dirección Técnica):", color: MUTED })],
-    }),
-    new Paragraph({ spacing: { before: 700 }, children: [] }),
+    sectionHeading("Fin del informe"),
+    bulletItem("Fecha de emisión y firma (Dirección Técnica):"),
+    buildSignatureBox(),
   ];
+}
+
+/** Recuadro vacío para la fecha de emisión y la firma de Dirección Técnica. */
+function buildSignatureBox(): Table {
+  const edge = { style: BorderStyle.SINGLE, size: 6, color: "555555" };
+  return new Table({
+    width: { size: 6500, type: WidthType.DXA },
+    indent: { size: 560, type: WidthType.DXA },
+    columnWidths: [6500],
+    layout: TableLayoutType.FIXED,
+    borders: {
+      top: edge,
+      bottom: edge,
+      left: edge,
+      right: edge,
+      insideHorizontal: edge,
+      insideVertical: edge,
+    },
+    rows: [
+      new TableRow({
+        cantSplit: true,
+        height: { value: 1700, rule: HeightRule.ATLEAST },
+        children: [new TableCell({ children: [new Paragraph({ children: [] })] })],
+      }),
+    ],
+  });
 }
 
 /** Encabezado de sección con viñeta cuadrada (▪). */
@@ -409,6 +452,15 @@ function bulletItem(label: string, value = ""): Paragraph {
   if (label) runs.push(new TextRun({ text: label, bold: true }));
   if (value) runs.push(new TextRun({ text: `${label ? " " : ""}${value}` }));
   return new Paragraph({ indent: { left: 560 }, spacing: { after: 30 }, children: runs });
+}
+
+/** Texto con sangría sin viñeta (p. ej. "ISO 11665-4", "No aplica."). */
+function plainItem(text: string): Paragraph {
+  return new Paragraph({
+    indent: { left: 560 },
+    spacing: { after: 30 },
+    children: [new TextRun({ text })],
+  });
 }
 
 // ---------------------------------------------------------------------------

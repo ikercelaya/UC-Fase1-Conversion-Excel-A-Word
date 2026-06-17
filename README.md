@@ -22,17 +22,19 @@ uno o varios Excel, se extraen los resultados de cada detector y se descarga un
    - **Cabecera** en todas las páginas: marca LaRUC, datos del departamento,
      numeración (`Página X de Y`) y `Nº DE INFORME` (tomado del nombre del
      archivo). **Pie** con la nota legal y el logo de acreditación **ENAC**.
-   - **Primera página** con la estructura del informe: *Datos del cliente*,
-     *Objeto del informe*, *Datos de las muestras*, *Método de ensayo*,
-     *Normativa*, *Incidencias* y la línea de acreditación ENAC. Los **datos
-     del cliente y de las muestras se dejan en blanco** para rellenarlos a mano;
-     solo se completa lo que se deriva del Excel (p. ej. *Nº de detectores*) y
-     los textos fijos del laboratorio.
+   - **Página 1**: portada, solo con el título (*INFORME DE ENSAYO* /
+     *DETERMINACIÓN DE LA CONCENTRACIÓN DE RADÓN EN AIRE*), cabecera y pie.
+   - **Página 2**: la estructura del informe (*Datos del cliente*, *Objeto del
+     informe*, *Datos de las muestras*, *Método de ensayo*, *Normativa*,
+     *Incidencias* y la línea de acreditación ENAC). Siguiendo la plantilla del
+     laboratorio, **los datos del cliente, de las muestras y del método se dejan
+     en blanco** para rellenarlos a mano; solo se incluyen los textos fijos.
    - Apartado *Resultados obtenidos* con el párrafo normativo y **una tabla por
      detector** (PROCEDENCIA, REFERENCIA, REFERENCIA UC, fechas,
      exposición/concentración con incertidumbre y L.D.), con las unidades en
      superíndice (kBq m⁻³ h, Bq m⁻³).
-   - Cierre con *Fin del informe* y espacio para la fecha de emisión y la firma.
+   - Cierre con *Fin del informe*, la línea *Fecha de emisión y firma (Dirección
+     Técnica)* y un **recuadro vacío** para la firma.
 4. El nombre del archivo incluye fecha y hora de generación (hora peninsular):
    `Informe_<archivo>_AAAA-MM-DD_HH-MM-SS.docx`.
 
