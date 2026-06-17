@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "embed-logo": "node scripts/embed-logo.mjs",
+    "embed-enac": "node scripts/embed-enac.mjs",
     "sample": "node scripts/make-sample.mjs"
   },
   "dependencies": {

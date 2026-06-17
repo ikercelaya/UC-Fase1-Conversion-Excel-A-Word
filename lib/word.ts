@@ -6,6 +6,7 @@ import {
   Header,
   HeadingLevel,
   ImageRun,
+  ISectionOptions,
   PageNumber,
   PageOrientation,
   Packer,
@@ -20,32 +21,52 @@ import {
   WidthType,
 } from "docx";
 import { MAX_ROWS_PER_SHEET, RadonData, RadonSample, SheetData, WorkbookData } from "./excel";
-import { UC_LOGO_BASE64, UC_LOGO_NATURAL } from "./ucLogo";
+import { ENAC_LOGO_BASE64, ENAC_LOGO_NATURAL } from "./enacLogo";
 
-// Paleta corporativa (coherente con la interfaz web)
+// Paleta corporativa
 const UC_TEAL = "0D9AA9";
 const INK = "1D2B32";
 const MUTED = "6B7A82";
-const LINE = "D9E2E5";
+const LINE = "C7D2D7";
 const ZEBRA = "F2F7F8";
 
-// Tamaño del logo en la cabecera del documento (px)
-const LOGO_HEIGHT = 34;
-const LOGO_WIDTH = Math.round((UC_LOGO_NATURAL.width / UC_LOGO_NATURAL.height) * LOGO_HEIGHT);
+// Logo ENAC del pie (px)
+const ENAC_HEIGHT = 54;
+const ENAC_WIDTH = Math.round((ENAC_LOGO_NATURAL.width / ENAC_LOGO_NATURAL.height) * ENAC_HEIGHT);
 
 // A4 en twips
-const A4_PORTRAIT = { width: 11906, height: 16838 };
+const A4 = { width: 11906, height: 16838 };
+const MARGIN = { left: 1100, right: 1100 };
+const CONTENT_WIDTH = A4.width - MARGIN.left - MARGIN.right; // 9706
 
-/** A partir de este número de columnas el documento se genera en horizontal. */
+/** A partir de este número de columnas el volcado se genera en horizontal. */
 const LANDSCAPE_COLUMN_THRESHOLD = 7;
 
 /** Celdas que parecen numéricas (importes, porcentajes…) se alinean a la derecha. */
 const NUMERIC_PATTERN = /^-?(?:\d{1,3}(?:[.,\s]\d{3})*|\d+)(?:[.,]\d+)?\s*(?:%|€)?$/;
 
+// Datos fijos del laboratorio (cabecera y textos normalizados del informe).
+const LAB_DEPT_LINES = [
+  "Dpto. de Ciencias Médicas y Quirúrgicas",
+  "Facultad de Medicina",
+  "Avd. Cardenal Herrera Oria s/n C.P. 39011",
+  "Santander (Tel: 942202207)",
+];
+const ENSAYO_OBJETO =
+  "Exposición y concentración de gas radón en aire a través de los análisis llevados a cabo en el Laboratorio de Radiactividad de la Universidad de Cantabria.";
+const METODO_EMPLEADO =
+  "El método empleado ha sido el que se recoge en la documentación de calidad del laboratorio referencia I-Ens01_10.";
+const ACREDITACION =
+  "Laboratorio de ensayo acreditado por ENAC con acreditación Nº 1204/LE2219";
+const FOOTER_LINE_1 =
+  "Este informe no podrá reproducirse parcialmente sin la autorización escrita del Laboratorio de Radiactividad de la Universidad de Cantabria.";
+const FOOTER_LINE_2 =
+  "Este certificado se considera original si es un archivo digital y está firmado electrónicamente. En cualquier otro caso se considera una copia.";
+
 /**
  * Un archivo Excel ya procesado. O bien tiene el formato del laboratorio
  * (radón) o se vuelca su contenido completo. Cada archivo conserva su nombre
- * de origen y su nº de informe, que se usa para la REFERENCIA UC.
+ * de origen y su nº de informe, que se usa en la cabecera y la REFERENCIA UC.
  */
 export interface CombinedReportFile {
   sourceFileName: string;
@@ -67,134 +88,194 @@ function documentStyles() {
   return {
     default: {
       document: {
-        run: { font: "Calibri", size: 21, color: INK }, // 10,5 pt
+        run: { font: "Arial", size: 20, color: INK }, // 10 pt
       },
       heading1: {
-        run: { font: "Calibri", size: 26, bold: true, color: UC_TEAL },
+        run: { font: "Arial", size: 26, bold: true, color: UC_TEAL },
         paragraph: { spacing: { before: 240, after: 120 } },
       },
     },
   };
 }
 
-/** Configuración de página A4 con la cabecera y márgenes corporativos. */
-function pageProperties(landscape: boolean) {
-  return {
-    page: {
-      size: landscape
-        ? { width: A4_PORTRAIT.height, height: A4_PORTRAIT.width, orientation: PageOrientation.LANDSCAPE }
-        : { width: A4_PORTRAIT.width, height: A4_PORTRAIT.height, orientation: PageOrientation.PORTRAIT },
-      margin: { top: 1700, bottom: 1100, left: 1000, right: 1000, header: 500, footer: 400 },
-    },
-  };
-}
-
 /**
  * Construye un único informe Word a partir de uno o varios archivos Excel.
- * Cada archivo aporta sus detectores (formato radón LaRUC) o el volcado de sus
- * hojas, y todo se concatena en un mismo documento. El resultado se devuelve
- * como buffer .docx.
+ * Cada archivo es un informe de ensayo completo (con su propia cabecera y nº
+ * de informe), siguiendo la estructura oficial del laboratorio (LaRUC). El
+ * resultado se devuelve como buffer .docx.
  */
 export async function buildCombinedReport({
   files,
   generatedAt,
 }: CombinedReportInput): Promise<Buffer> {
-  const multiple = files.length > 1;
-  const anyRadon = files.some((file) => file.radon);
-  const anyVolcado = files.some((file) => !file.radon && file.workbook);
-  const allRadon = anyRadon && !anyVolcado;
-  const allVolcado = anyVolcado && !anyRadon;
+  void generatedAt; // la fecha de emisión la rellena el laboratorio a mano
 
-  // El documento es horizontal si algún volcado tiene muchas columnas.
-  const landscape = files.some((file) =>
-    file.workbook?.sheets.some((sheet) => sheet.columnCount >= LANDSCAPE_COLUMN_THRESHOLD),
+  const sections: ISectionOptions[] = files.map((file) =>
+    file.radon ? buildRadonSection(file) : buildVolcadoSection(file),
   );
 
-  const children: (Paragraph | Table)[] = [
-    ...buildCombinedCover(files, generatedAt, { allRadon, allVolcado }),
-  ];
-
-  // La leyenda (notas (1) y (2)) se muestra una sola vez, antes del primer
-  // archivo de radón.
-  let legendShown = false;
-  files.forEach((file, index) => {
-    const startNewPage = index > 0;
-    if (file.radon) {
-      children.push(buildRadonHeading(file, multiple, startNewPage));
-      if (!legendShown) {
-        children.push(...buildRadonLegend());
-        legendShown = true;
-      }
-      children.push(...buildRadonTables(file));
-    } else if (file.workbook) {
-      children.push(...buildWorkbookBlocks(file, multiple, startNewPage));
-    }
-  });
-
   const document = new Document({
-    creator: "Universidad de Cantabria",
-    title: buildDocumentTitle(files),
-    description: "Informe generado automáticamente a partir de archivos Excel",
+    creator: "Universidad de Cantabria · LaRUC",
+    title:
+      files.length === 1
+        ? `Informe de ensayo — ${files[0].sourceFileName}`
+        : `Informes de ensayo — ${files.length} archivos`,
+    description: "Informe de ensayo generado automáticamente a partir del Excel de medidas",
     styles: documentStyles(),
-    sections: [
-      {
-        properties: pageProperties(landscape),
-        headers: { default: buildHeader() },
-        footers: { default: buildFooter() },
-        children,
-      },
-    ],
+    sections,
   });
 
   return Packer.toBuffer(document);
 }
 
-function buildDocumentTitle(files: CombinedReportFile[]): string {
-  if (files.length === 1) return `Informe — ${files[0].sourceFileName}`;
-  return `Informe — ${files.length} archivos`;
+// ---------------------------------------------------------------------------
+// Sección de un informe de ensayo de radón (estructura oficial del laboratorio)
+// ---------------------------------------------------------------------------
+
+function buildRadonSection(file: CombinedReportFile): ISectionOptions {
+  const samples = file.radon?.samples ?? [];
+  return {
+    properties: {
+      page: {
+        size: { width: A4.width, height: A4.height, orientation: PageOrientation.PORTRAIT },
+        margin: { top: 2350, bottom: 1500, left: MARGIN.left, right: MARGIN.right, header: 460, footer: 360 },
+        pageNumbers: { start: 1 }, // cada informe numera sus páginas desde 1
+      },
+    },
+    headers: { default: buildHeader(file.reportNumber) },
+    footers: { default: buildFooter() },
+    children: [
+      ...buildCoverPage(samples.length),
+      ...buildResultsIntro(),
+      ...samples.flatMap((sample, index) => [
+        buildSampleTable(sample, referenciaUC(file.reportNumber, index + 1)),
+        new Paragraph({ spacing: { before: 60, after: 60 }, children: [] }),
+      ]),
+      ...buildClosing(),
+    ],
+  };
 }
 
-/** Cabecera de página: logo UC con una línea corporativa debajo. */
-function buildHeader(): Header {
+/** Cabecera de página: marca LaRUC (izq.) y datos del laboratorio + nº de informe (der.). */
+function buildHeader(reportNumber: string): Header {
+  const right = (runs: TextRun[]) =>
+    new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 0, line: 200 }, children: runs });
+
   return new Header({
     children: [
-      new Paragraph({
-        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: UC_TEAL, space: 6 } },
-        spacing: { after: 0 },
-        children: [
-          new ImageRun({
-            type: "png",
-            data: Buffer.from(UC_LOGO_BASE64, "base64"),
-            transformation: { width: LOGO_WIDTH, height: LOGO_HEIGHT },
-            altText: {
-              title: "Universidad de Cantabria",
-              description: "Logotipo de la Universidad de Cantabria",
-              name: "Logo UC",
-            },
+      new Table({
+        width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+        columnWidths: [4600, CONTENT_WIDTH - 4600],
+        layout: TableLayoutType.FIXED,
+        borders: noBorders(),
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: noBorders(),
+                verticalAlign: VerticalAlign.TOP,
+                children: larucWordmark(),
+              }),
+              new TableCell({
+                borders: noBorders(),
+                verticalAlign: VerticalAlign.TOP,
+                children: [
+                  right([
+                    new TextRun({ text: "Página ", size: 14, color: MUTED }),
+                    new TextRun({ children: [PageNumber.CURRENT], size: 14, color: MUTED }),
+                    new TextRun({ text: " de ", size: 14, color: MUTED }),
+                    new TextRun({ children: [PageNumber.TOTAL_PAGES_IN_SECTION], size: 14, color: MUTED }),
+                  ]),
+                  ...LAB_DEPT_LINES.map((line) => right([new TextRun({ text: line, size: 14, color: MUTED })])),
+                  right([
+                    new TextRun({ text: `Nº DE INFORME: ${reportNumber || "—"}`, bold: true, size: 19, color: INK }),
+                  ]),
+                ],
+              }),
+            ],
           }),
         ],
+      }),
+      new Paragraph({
+        spacing: { before: 40, after: 0 },
+        border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: UC_TEAL, space: 1 } },
+        children: [],
       }),
     ],
   });
 }
 
-/** Pie de página: nota institucional y numeración. */
+/** Marca textual "LaRUC" (el logotipo oficial es un EMF que se puede sustituir luego). */
+function larucWordmark(): Paragraph[] {
+  return [
+    new Paragraph({
+      spacing: { after: 0 },
+      children: [
+        new TextRun({ text: "La", bold: true, size: 40, color: MUTED }),
+        new TextRun({ text: "RUC", bold: true, size: 40, color: UC_TEAL }),
+      ],
+    }),
+    new Paragraph({
+      spacing: { before: 0, after: 0, line: 180 },
+      children: [new TextRun({ text: "Laboratorio de Radiactividad Ambiental", size: 13, color: MUTED })],
+    }),
+    new Paragraph({
+      spacing: { before: 0, after: 0, line: 180 },
+      children: [new TextRun({ text: "Universidad de Cantabria", size: 13, color: MUTED })],
+    }),
+  ];
+}
+
+/** Pie de página: logo ENAC (izq.) y nota legal (der.). */
 function buildFooter(): Footer {
+  const legal = (text: string) =>
+    new Paragraph({
+      alignment: AlignmentType.LEFT,
+      spacing: { after: 20, line: 180 },
+      children: [new TextRun({ text, size: 13, color: MUTED })],
+    });
+
   return new Footer({
     children: [
       new Paragraph({
-        alignment: AlignmentType.CENTER,
-        border: { top: { style: BorderStyle.SINGLE, size: 4, color: LINE, space: 4 } },
-        children: [
-          new TextRun({
-            text: "Universidad de Cantabria · Informe generado automáticamente",
-            size: 16,
-            color: MUTED,
-          }),
-          new TextRun({
-            children: ["   ·   Página ", PageNumber.CURRENT, " de ", PageNumber.TOTAL_PAGES],
-            size: 16,
-            color: MUTED,
+        spacing: { before: 0, after: 40 },
+        border: { top: { style: BorderStyle.SINGLE, size: 4, color: LINE, space: 1 } },
+        children: [],
+      }),
+      new Table({
+        width: { size: CONTENT_WIDTH, type: WidthType.DXA },
+        columnWidths: [1250, CONTENT_WIDTH - 1250],
+        layout: TableLayoutType.FIXED,
+        borders: noBorders(),
+        rows: [
+          new TableRow({
+            children: [
+              new TableCell({
+                borders: noBorders(),
+                verticalAlign: VerticalAlign.CENTER,
+                children: [
+                  new Paragraph({
+                    children: [
+                      new ImageRun({
+                        type: "png",
+                        data: Buffer.from(ENAC_LOGO_BASE64, "base64"),
+                        transformation: { width: ENAC_WIDTH, height: ENAC_HEIGHT },
+                        altText: {
+                          title: "ENAC",
+                          description: "Acreditación ENAC Nº 1204/LE2219",
+                          name: "Logo ENAC",
+                        },
+                      }),
+                    ],
+                  }),
+                ],
+              }),
+              new TableCell({
+                borders: noBorders(),
+                verticalAlign: VerticalAlign.CENTER,
+                children: [legal(FOOTER_LINE_1), legal(FOOTER_LINE_2)],
+              }),
+            ],
           }),
         ],
       }),
@@ -202,87 +283,313 @@ function buildFooter(): Footer {
   });
 }
 
-/** Portada: título del informe y metadatos de la generación (uno o varios archivos). */
-function buildCombinedCover(
-  files: CombinedReportFile[],
-  generatedAt: Date,
-  { allRadon, allVolcado }: { allRadon: boolean; allVolcado: boolean },
-): Paragraph[] {
-  const formattedDate = new Intl.DateTimeFormat("es-ES", {
-    dateStyle: "long",
-    timeStyle: "medium",
-    timeZone: "Europe/Madrid",
-  }).format(generatedAt);
-
-  const title = allRadon ? "Informe de ensayo" : allVolcado ? "Informe de datos" : "Informe";
-  const subtitle = allRadon
-    ? "Determinación de la exposición a radón en aire"
-    : allVolcado
-      ? "Extracción completa del contenido de los archivos Excel"
-      : "Resultados de radón y volcado de datos";
-
-  const totalDetectores = files.reduce((sum, file) => sum + (file.radon?.samples.length ?? 0), 0);
-  const totalHojas = files.reduce((sum, file) => sum + (file.workbook?.sheets.length ?? 0), 0);
-  const totalFilas = files.reduce((sum, file) => sum + (file.workbook?.totalRows ?? 0), 0);
-
-  const metadata: Array<[string, string]> = [];
-  if (files.length === 1) {
-    metadata.push(["Archivo de origen", files[0].sourceFileName]);
-    if (files[0].reportNumber) metadata.push(["Nº de informe", files[0].reportNumber]);
-  } else {
-    metadata.push(["Archivos de origen", files.length.toLocaleString("es-ES")]);
-  }
-  metadata.push(["Fecha de generación", formattedDate]);
-  if (totalDetectores > 0) {
-    metadata.push(["Detectores procesados", totalDetectores.toLocaleString("es-ES")]);
-  }
-  if (totalHojas > 0) metadata.push(["Hojas procesadas", totalHojas.toLocaleString("es-ES")]);
-  if (totalFilas > 0) metadata.push(["Filas de datos", totalFilas.toLocaleString("es-ES")]);
-
-  const paragraphs: Paragraph[] = [
+/** Primera página del informe: título y secciones de datos (datos del cliente en blanco). */
+function buildCoverPage(detectorCount: number): Paragraph[] {
+  return [
     new Paragraph({
-      spacing: { before: 120, after: 60 },
-      children: [new TextRun({ text: title, size: 52, bold: true, color: INK })],
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 0, after: 40 },
+      children: [new TextRun({ text: "INFORME DE ENSAYO", bold: true, size: 36, color: INK })],
     }),
     new Paragraph({
-      spacing: { after: 280 },
-      children: [new TextRun({ text: subtitle, size: 22, color: MUTED })],
-    }),
-    ...metadata.map(
-      ([label, value]) =>
-        new Paragraph({
-          spacing: { after: 40 },
-          children: [
-            new TextRun({ text: `${label}:  `, bold: true }),
-            new TextRun({ text: value }),
-          ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 220 },
+      border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: LINE, space: 6 } },
+      children: [
+        new TextRun({
+          text: "DETERMINACIÓN DE LA CONCENTRACIÓN DE RADÓN EN AIRE",
+          bold: true,
+          size: 24,
+          color: UC_TEAL,
         }),
-    ),
+      ],
+    }),
+
+    sectionHeading("Datos del cliente"),
+    bulletItem("Entidad:"),
+    bulletItem("Dirección:"),
+    bulletItem("Persona de contacto:"),
+    bulletItem("Tel:"),
+    bulletItem("Email:"),
+
+    sectionHeading("Objeto del informe"),
+    bulletItem("Ensayo a realizar:", ENSAYO_OBJETO),
+    bulletItem("Nº de detectores:", String(detectorCount)),
+    bulletItem("Nº de medidas realizadas:"),
+
+    sectionHeading("Datos de las muestras objeto del ensayo"),
+    bulletItem("Los detectores han sido colocados por"),
+    bulletItem("Los detectores han sido recogidos por"),
+    bulletItem("Los detectores han sido aptos para su ensayo"),
+    bulletItem("Lugar de colocación del detector/es:"),
+    bulletItem("Fecha de colocación del detector/es:"),
+    bulletItem("Fecha de retirada del detector/es:"),
+    bulletItem("Fecha de recepción en el laboratorio:"),
+    bulletItem("Fecha inicio ensayo:"),
+    bulletItem("Fecha final ensayo:"),
+
+    sectionHeading("Método de ensayo"),
+    bulletItem("Lugar de realización del ensayo:", "Instalaciones de LaRUC"),
+    bulletItem("Método de ensayo empleado:", METODO_EMPLEADO),
+
+    sectionHeading("Normativa que afecta a este ensayo"),
+    bulletItem("ISO 11665-4"),
+
+    sectionHeading("Incidencias durante la captación, retirada, transporte y/o ensayo"),
+    bulletItem(""),
+
+    new Paragraph({
+      spacing: { before: 160, after: 80 },
+      children: [new TextRun({ text: ACREDITACION, bold: true })],
+    }),
   ];
+}
 
-  // Con varios archivos, se lista cada uno con su nº de detectores u hojas.
-  if (files.length > 1) {
-    paragraphs.push(
-      new Paragraph({
-        spacing: { before: 160, after: 40 },
-        children: [new TextRun({ text: "Archivos incluidos", bold: true })],
-      }),
-      ...files.map((file, index) => {
-        const detail = file.radon
-          ? `${file.radon.samples.length} detectores${file.reportNumber ? ` · nº ${file.reportNumber}` : ""}`
-          : `${file.workbook?.sheets.length ?? 0} hojas`;
-        return new Paragraph({
-          spacing: { after: 20 },
-          children: [
-            new TextRun({ text: `${index + 1}. ${file.sourceFileName}  ` }),
-            new TextRun({ text: `(${detail})`, size: 18, color: MUTED }),
-          ],
-        });
-      }),
+/** Encabezado "Resultados obtenidos" y párrafo introductorio normalizado. */
+function buildResultsIntro(): Paragraph[] {
+  return [
+    sectionHeading("Resultados obtenidos"),
+    new Paragraph({
+      alignment: AlignmentType.JUSTIFIED,
+      spacing: { after: 160 },
+      children: [
+        new TextRun({
+          text:
+            "Los resultados que contiene este informe solo afectan a los detectores sometidos a ensayo. " +
+            "Las tablas siguientes contienen los resultados de la medida expresando la exposición en unidades kBq m",
+          size: 20,
+        }),
+        sup("-3"),
+        new TextRun({ text: " h y la concentración en unidades Bq m", size: 20 }),
+        sup("-3"),
+        new TextRun({
+          text:
+            ". Los resultados de incertidumbre de este informe de ensayo se corresponden con un factor de " +
+            "cobertura k = 2. Los valores de la incertidumbre aparecen expresados con dos cifras significativas " +
+            "y el resto de valores del apartado de resultados se expresan en coherencia con la incertidumbre. " +
+            "Se sigue lo indicado en el documento 'Evaluation of measurement data — Guide to the expression of " +
+            "uncertainty in measurement' (JCGM 100:2008 GUM 1995 with minor corrections).",
+          size: 20,
+        }),
+      ],
+    }),
+  ];
+}
+
+/** Cierre del informe y espacio para fecha de emisión y firma. */
+function buildClosing(): Paragraph[] {
+  return [
+    new Paragraph({
+      spacing: { before: 240, after: 60 },
+      children: [new TextRun({ text: "Fin del informe", bold: true })],
+    }),
+    new Paragraph({
+      spacing: { before: 120, after: 0 },
+      children: [new TextRun({ text: "Fecha de emisión y firma (Dirección Técnica):", color: MUTED })],
+    }),
+    new Paragraph({ spacing: { before: 700 }, children: [] }),
+  ];
+}
+
+/** Encabezado de sección con viñeta cuadrada (▪). */
+function sectionHeading(text: string): Paragraph {
+  return new Paragraph({
+    spacing: { before: 200, after: 60 },
+    keepNext: true,
+    children: [
+      new TextRun({ text: "▪  ", bold: true, color: UC_TEAL }),
+      new TextRun({ text, bold: true, size: 22, color: INK }),
+    ],
+  });
+}
+
+/** Punto "– etiqueta valor" con sangría (valor vacío = a rellenar a mano). */
+function bulletItem(label: string, value = ""): Paragraph {
+  const runs = [new TextRun({ text: "–  ", color: MUTED })];
+  if (label) runs.push(new TextRun({ text: label, bold: true }));
+  if (value) runs.push(new TextRun({ text: `${label ? " " : ""}${value}` }));
+  return new Paragraph({ indent: { left: 560 }, spacing: { after: 30 }, children: runs });
+}
+
+// ---------------------------------------------------------------------------
+// Tabla de un detector (misma estructura que el informe del laboratorio)
+// ---------------------------------------------------------------------------
+
+// Anchos de columna del informe original del laboratorio (twips).
+const RADON_COLUMNS = [2345, 1985, 2058, 3137];
+const RADON_TABLE_WIDTH = RADON_COLUMNS.reduce((sum, width) => sum + width, 0);
+const RADON_VALUE_SPAN_WIDTH = RADON_COLUMNS[1] + RADON_COLUMNS[2] + RADON_COLUMNS[3];
+
+/** REFERENCIA UC secuencial (P-<informe>-TRA-<n>), como en los informes del laboratorio. */
+function referenciaUC(reportNumber: string, position: number): string {
+  return reportNumber ? `P-${reportNumber}-TRA-${position}` : "";
+}
+
+/** Tabla de un detector con la misma estructura que el informe del laboratorio. */
+function buildSampleTable(sample: RadonSample, refUC: string): Table {
+  return new Table({
+    width: { size: RADON_TABLE_WIDTH, type: WidthType.DXA },
+    columnWidths: RADON_COLUMNS,
+    layout: TableLayoutType.FIXED,
+    margins: { top: 60, bottom: 60, left: 100, right: 100 },
+    borders: {
+      top: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      bottom: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      left: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      right: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      insideVertical: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+    },
+    rows: [
+      labelValueRow("PROCEDENCIA", [], true),
+      labelValueRow("REFERENCIA", [new TextRun(sample.id)], true),
+      labelValueRow("REFERENCIA UC", refUC ? [new TextRun(refUC)] : [], true),
+      labelValueRow("FECHA COLOCACIÓN", valueRuns(sample.fechaColocacion), true),
+      labelValueRow("FECHA RETIRADA", valueRuns(sample.fechaRetirada), true),
+      pairRow(
+        ["EXPOSICIÓN", expUnitRuns()],
+        sample.exposicion,
+        ["CONCENTRACIÓN", concUnitRuns()],
+        sample.concentracion,
+        true,
+      ),
+      pairRow(
+        ["INCERTIDUMBRE", expUnitRuns()],
+        sample.incertidumbreExposicion,
+        ["INCERTIDUMBRE", concUnitRuns()],
+        sample.incertidumbreConcentracion,
+        true,
+      ),
+      pairRow(
+        ["L.D.", expUnitRuns()],
+        sample.ldExposicion,
+        ["L.D.", concUnitRuns()],
+        sample.ldConcentracion,
+        false,
+      ),
+    ],
+  });
+}
+
+function sup(text: string): TextRun {
+  return new TextRun({ text, superScript: true });
+}
+
+/** Unidades de exposición: (kBq m⁻³ h). */
+function expUnitRuns(): TextRun[] {
+  return [new TextRun("(kBq m"), sup("-3"), new TextRun(" h)")];
+}
+
+/** Unidades de concentración: (Bq m⁻³). */
+function concUnitRuns(): TextRun[] {
+  return [new TextRun("(Bq m"), sup("-3"), new TextRun(")")];
+}
+
+function valueRuns(value: string): TextRun[] {
+  return value ? [new TextRun(value)] : [];
+}
+
+function radonParagraph(
+  runs: TextRun[],
+  alignment: (typeof AlignmentType)[keyof typeof AlignmentType],
+  keepNext: boolean,
+): Paragraph {
+  return new Paragraph({ alignment, keepNext, children: runs });
+}
+
+function radonCell(paragraphs: Paragraph[], width: number, span?: number): TableCell {
+  return new TableCell({
+    width: { size: width, type: WidthType.DXA },
+    columnSpan: span,
+    verticalAlign: VerticalAlign.CENTER,
+    children: paragraphs,
+  });
+}
+
+/** Fila "etiqueta | valor" (el valor ocupa las tres columnas restantes). */
+function labelValueRow(label: string, valueRuns: TextRun[], keepNext: boolean): TableRow {
+  return new TableRow({
+    cantSplit: true,
+    children: [
+      radonCell([radonParagraph([new TextRun(label)], AlignmentType.LEFT, keepNext)], RADON_COLUMNS[0]),
+      radonCell(
+        [radonParagraph(valueRuns, AlignmentType.CENTER, keepNext)],
+        RADON_VALUE_SPAN_WIDTH,
+        3,
+      ),
+    ],
+  });
+}
+
+/** Fila doble "magnitud exposición | valor | magnitud concentración | valor". */
+function pairRow(
+  [labelLeft, unitsLeft]: [string, TextRun[]],
+  valueLeft: string,
+  [labelRight, unitsRight]: [string, TextRun[]],
+  valueRight: string,
+  keepNext: boolean,
+): TableRow {
+  const labelCell = (label: string, units: TextRun[], width: number) =>
+    radonCell(
+      [
+        radonParagraph([new TextRun(label)], AlignmentType.LEFT, true),
+        radonParagraph(units, AlignmentType.LEFT, keepNext),
+      ],
+      width,
     );
-  }
+  const valueCell = (value: string, width: number) =>
+    radonCell([radonParagraph(value ? [new TextRun(value)] : [], AlignmentType.CENTER, keepNext)], width);
 
-  return paragraphs;
+  return new TableRow({
+    cantSplit: true,
+    children: [
+      labelCell(labelLeft, unitsLeft, RADON_COLUMNS[0]),
+      valueCell(valueLeft, RADON_COLUMNS[1]),
+      labelCell(labelRight, unitsRight, RADON_COLUMNS[2]),
+      valueCell(valueRight, RADON_COLUMNS[3]),
+    ],
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Sección de volcado (archivos que no tienen el formato del laboratorio)
+// ---------------------------------------------------------------------------
+
+function buildVolcadoSection(file: CombinedReportFile): ISectionOptions {
+  const sheets = file.workbook?.sheets ?? [];
+  const landscape = sheets.some((sheet) => sheet.columnCount >= LANDSCAPE_COLUMN_THRESHOLD);
+
+  return {
+    properties: {
+      page: {
+        size: landscape
+          ? { width: A4.height, height: A4.width, orientation: PageOrientation.LANDSCAPE }
+          : { width: A4.width, height: A4.height, orientation: PageOrientation.PORTRAIT },
+        margin: { top: 2350, bottom: 1500, left: MARGIN.left, right: MARGIN.right, header: 460, footer: 360 },
+        pageNumbers: { start: 1 },
+      },
+    },
+    headers: { default: buildHeader(file.reportNumber) },
+    footers: { default: buildFooter() },
+    children: [
+      new Paragraph({
+        spacing: { after: 40 },
+        children: [new TextRun({ text: `Volcado de datos — ${file.sourceFileName}`, bold: true, size: 28, color: INK })],
+      }),
+      new Paragraph({
+        spacing: { after: 160 },
+        children: [
+          new TextRun({
+            text: "El archivo no tiene el formato del laboratorio; se vuelca todo su contenido.",
+            italics: true,
+            size: 18,
+            color: MUTED,
+          }),
+        ],
+      }),
+      ...sheets.flatMap((sheet, index) => buildSheetSection(sheet, index, index > 0)),
+    ],
+  };
 }
 
 /** Sección de una hoja: título, resumen y tabla con todos los datos. */
@@ -408,218 +715,15 @@ function buildCellParagraphs(text: string): Paragraph[] {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Informe de ensayo de radón (tabla por detector, formato del laboratorio)
-// ---------------------------------------------------------------------------
-
-// Anchos de columna del informe original del laboratorio (twips).
-const RADON_COLUMNS = [2345, 1985, 2058, 3137];
-const RADON_TABLE_WIDTH = RADON_COLUMNS.reduce((sum, width) => sum + width, 0);
-const RADON_VALUE_SPAN_WIDTH = RADON_COLUMNS[1] + RADON_COLUMNS[2] + RADON_COLUMNS[3];
-
-/** Encabezado de un archivo de radón: nombre del archivo, o título genérico si es uno solo. */
-function buildRadonHeading(
-  file: CombinedReportFile,
-  multiple: boolean,
-  startNewPage: boolean,
-): Paragraph {
-  const text = multiple ? file.sourceFileName : "Resultados por detector";
-  return new Paragraph({
-    heading: HeadingLevel.HEADING_1,
-    pageBreakBefore: startNewPage,
-    children: [new TextRun(text)],
-  });
-}
-
-/** Tablas de los detectores de un archivo (REFERENCIA UC secuencial con su nº de informe). */
-function buildRadonTables(file: CombinedReportFile): (Paragraph | Table)[] {
-  const samples = file.radon?.samples ?? [];
-  return samples.flatMap((sample, index) => [
-    buildSampleTable(sample, referenciaUC(file.reportNumber, index + 1)),
-    // separador: evita que Word funda tablas consecutivas
-    new Paragraph({ spacing: { before: 60, after: 60 }, children: [] }),
-  ]);
-}
-
-/** Bloques del volcado completo de un archivo: título del archivo (si hay varios) y una sección por hoja. */
-function buildWorkbookBlocks(
-  file: CombinedReportFile,
-  multiple: boolean,
-  startNewPage: boolean,
-): (Paragraph | Table)[] {
-  const sheets = file.workbook?.sheets ?? [];
-  if (!multiple) {
-    return sheets.flatMap((sheet, index) => buildSheetSection(sheet, index));
-  }
-  return [
-    new Paragraph({
-      heading: HeadingLevel.HEADING_1,
-      pageBreakBefore: startNewPage,
-      children: [new TextRun(file.sourceFileName)],
-    }),
-    ...sheets.flatMap((sheet, index) => buildSheetSection(sheet, index, index > 0)),
-  ];
-}
-
-/** REFERENCIA UC secuencial (P-<informe>-TRA-<n>), como en los informes del laboratorio. */
-function referenciaUC(reportNumber: string, position: number): string {
-  return reportNumber ? `P-${reportNumber}-TRA-${position}` : "";
-}
-
-/** Notas (1) y (2) del informe original más el aviso de campos no disponibles. */
-function buildRadonLegend(): Paragraph[] {
-  const note = (marker: string, text: string) =>
-    new Paragraph({
-      spacing: { after: 40 },
-      children: [
-        new TextRun({ text: marker, superScript: true, size: 18, color: MUTED }),
-        new TextRun({ text: ` ${text}`, size: 18, color: MUTED }),
-      ],
-    });
-
-  return [
-    note("(1)", "La información ha sido proporcionada por el cliente."),
-    note(
-      "(2)",
-      "El resultado de la concentración se ha calculado según las fechas de exposición facilitadas por el cliente.",
-    ),
-    new Paragraph({
-      spacing: { after: 200 },
-      children: [
-        new TextRun({
-          text: "El campo PROCEDENCIA no está disponible en el archivo Excel y se deja en blanco.",
-          italics: true,
-          size: 18,
-          color: MUTED,
-        }),
-      ],
-    }),
-  ];
-}
-
-/** Tabla de un detector con la misma estructura que el informe del laboratorio. */
-function buildSampleTable(sample: RadonSample, refUC: string): Table {
-  return new Table({
-    width: { size: RADON_TABLE_WIDTH, type: WidthType.DXA },
-    columnWidths: RADON_COLUMNS,
-    layout: TableLayoutType.FIXED,
-    margins: { top: 60, bottom: 60, left: 100, right: 100 },
-    borders: {
-      top: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-      bottom: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-      left: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-      right: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-      insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-      insideVertical: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-    },
-    rows: [
-      labelValueRow("PROCEDENCIA", [], true),
-      labelValueRow("REFERENCIA", [new TextRun(sample.id)], true),
-      labelValueRow("REFERENCIA UC", refUC ? [new TextRun(refUC)] : [], true),
-      labelValueRow("FECHA COLOCACIÓN", clientDataRuns(sample.fechaColocacion), true),
-      labelValueRow("FECHA RETIRADA", clientDataRuns(sample.fechaRetirada), true),
-      pairRow(
-        ["EXPOSICIÓN", expUnitRuns()],
-        sample.exposicion,
-        ["CONCENTRACIÓN", concUnitRuns()],
-        sample.concentracion,
-        true,
-      ),
-      pairRow(
-        ["INCERTIDUMBRE", expUnitRuns()],
-        sample.incertidumbreExposicion,
-        ["INCERTIDUMBRE", concUnitRuns()],
-        sample.incertidumbreConcentracion,
-        true,
-      ),
-      pairRow(
-        ["L.D.", expUnitRuns()],
-        sample.ldExposicion,
-        ["L.D.", concUnitRuns()],
-        sample.ldConcentracion,
-        false,
-      ),
-    ],
-  });
-}
-
-function sup(text: string): TextRun {
-  return new TextRun({ text, superScript: true });
-}
-
-/** Unidades de exposición: (kBq m⁻³ h). */
-function expUnitRuns(): TextRun[] {
-  return [new TextRun("(kBq m"), sup("-3"), new TextRun(" h)")];
-}
-
-/** Unidades de concentración: (Bq m⁻³) ⁽²⁾. */
-function concUnitRuns(): TextRun[] {
-  return [new TextRun("(Bq m"), sup("-3"), new TextRun(") "), sup("(2)")];
-}
-
-/** Valor aportado por el cliente: añade la nota superíndice (1) si hay valor. */
-function clientDataRuns(value: string): TextRun[] {
-  return value ? [new TextRun(`${value} `), sup("(1)")] : [];
-}
-
-function radonParagraph(
-  runs: TextRun[],
-  alignment: (typeof AlignmentType)[keyof typeof AlignmentType],
-  keepNext: boolean,
-): Paragraph {
-  return new Paragraph({ alignment, keepNext, children: runs });
-}
-
-function radonCell(paragraphs: Paragraph[], width: number, span?: number): TableCell {
-  return new TableCell({
-    width: { size: width, type: WidthType.DXA },
-    columnSpan: span,
-    verticalAlign: VerticalAlign.CENTER,
-    children: paragraphs,
-  });
-}
-
-/** Fila "etiqueta | valor" (el valor ocupa las tres columnas restantes). */
-function labelValueRow(label: string, valueRuns: TextRun[], keepNext: boolean): TableRow {
-  return new TableRow({
-    cantSplit: true,
-    children: [
-      radonCell([radonParagraph([new TextRun(label)], AlignmentType.LEFT, keepNext)], RADON_COLUMNS[0]),
-      radonCell(
-        [radonParagraph(valueRuns, AlignmentType.CENTER, keepNext)],
-        RADON_VALUE_SPAN_WIDTH,
-        3,
-      ),
-    ],
-  });
-}
-
-/** Fila doble "magnitud exposición | valor | magnitud concentración | valor". */
-function pairRow(
-  [labelLeft, unitsLeft]: [string, TextRun[]],
-  valueLeft: string,
-  [labelRight, unitsRight]: [string, TextRun[]],
-  valueRight: string,
-  keepNext: boolean,
-): TableRow {
-  const labelCell = (label: string, units: TextRun[], width: number) =>
-    radonCell(
-      [
-        radonParagraph([new TextRun(label)], AlignmentType.LEFT, true),
-        radonParagraph(units, AlignmentType.LEFT, keepNext),
-      ],
-      width,
-    );
-  const valueCell = (value: string, width: number) =>
-    radonCell([radonParagraph(value ? [new TextRun(value)] : [], AlignmentType.CENTER, keepNext)], width);
-
-  return new TableRow({
-    cantSplit: true,
-    children: [
-      labelCell(labelLeft, unitsLeft, RADON_COLUMNS[0]),
-      valueCell(valueLeft, RADON_COLUMNS[1]),
-      labelCell(labelRight, unitsRight, RADON_COLUMNS[2]),
-      valueCell(valueRight, RADON_COLUMNS[3]),
-    ],
-  });
+/** Bordes invisibles para tablas de maquetación (cabecera/pie). */
+function noBorders() {
+  const none = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+  return {
+    top: none,
+    bottom: none,
+    left: none,
+    right: none,
+    insideHorizontal: none,
+    insideVertical: none,
+  };
 }

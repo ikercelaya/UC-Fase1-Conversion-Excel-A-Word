@@ -15,16 +15,24 @@ uno o varios Excel, se extraen los resultados de cada detector y se descarga un
    ID, fechas de colocación y retirada, exposición, concentración,
    incertidumbres (k=2) y límites de detección. Los huecos sin detector
    (ID `0`) se descartan.
-3. Genera un **único documento Word (.docx)** combinando todos los archivos con:
-   - Logo de la UC en la cabecera de todas las páginas y pie con numeración.
-   - Portada con metadatos: archivos de origen, fecha y hora de generación y
-     nº total de detectores, más las notas (1) y (2) del laboratorio. Con
-     varios archivos se incluye además la lista de archivos procesados.
-   - **Una tabla por detector** con la misma estructura que el informe de
-     ensayo del laboratorio: PROCEDENCIA, REFERENCIA, REFERENCIA UC, fechas,
-     exposición/concentración con incertidumbre y L.D., con superíndices
-     (kBq m⁻³ h, Bq m⁻³). Cada archivo conserva su propio nº de informe en la
-     REFERENCIA UC.
+3. Genera un **documento Word (.docx)** que sigue la **estructura oficial del
+   informe de ensayo del laboratorio (LaRUC)**. Cada Excel produce un informe
+   completo (si se suben varios, se concatenan, cada uno con su propia cabecera
+   y numeración de páginas):
+   - **Cabecera** en todas las páginas: marca LaRUC, datos del departamento,
+     numeración (`Página X de Y`) y `Nº DE INFORME` (tomado del nombre del
+     archivo). **Pie** con la nota legal y el logo de acreditación **ENAC**.
+   - **Primera página** con la estructura del informe: *Datos del cliente*,
+     *Objeto del informe*, *Datos de las muestras*, *Método de ensayo*,
+     *Normativa*, *Incidencias* y la línea de acreditación ENAC. Los **datos
+     del cliente y de las muestras se dejan en blanco** para rellenarlos a mano;
+     solo se completa lo que se deriva del Excel (p. ej. *Nº de detectores*) y
+     los textos fijos del laboratorio.
+   - Apartado *Resultados obtenidos* con el párrafo normativo y **una tabla por
+     detector** (PROCEDENCIA, REFERENCIA, REFERENCIA UC, fechas,
+     exposición/concentración con incertidumbre y L.D.), con las unidades en
+     superíndice (kBq m⁻³ h, Bq m⁻³).
+   - Cierre con *Fin del informe* y espacio para la fecha de emisión y la firma.
 4. El nombre del archivo incluye fecha y hora de generación (hora peninsular):
    `Informe_<archivo>_AAAA-MM-DD_HH-MM-SS.docx`.
 
@@ -35,6 +43,9 @@ Campos derivados o no disponibles:
   dígitos iniciales del nombre del archivo (`26024 (…).xlsx` → `26024`);
   si el nombre no empieza por dígitos, el campo queda en blanco.
 - **PROCEDENCIA** no existe en el Excel de medidas y se deja en blanco.
+- El **logotipo LaRUC** de la cabecera se compone como texto (el logo oficial
+  es un EMF que no se puede incrustar directamente); puede sustituirse más
+  adelante. El **logo ENAC** del pie sí va incrustado (ver más abajo).
 
 Si el archivo no tiene el formato del laboratorio, la herramienta hace un
 **volcado completo**: una sección por hoja con todos sus datos en tablas
@@ -58,13 +69,16 @@ app/
   api/convert/route.ts  Endpoint POST: Excel → Word
 lib/
   excel.ts              Extracción: bloques de radón (LaRUC) y volcado completo
-  word.ts               Construcción de los informes Word (radón y volcado)
-  ucLogo.ts             Logo incrustado en base64 (generado, no editar a mano)
+  word.ts               Construcción del informe Word (estructura oficial LaRUC)
+  ucLogo.ts             Logo UC incrustado en base64 (generado, no editar a mano)
+  enacLogo.ts           Logo ENAC del pie en base64 (generado, no editar a mano)
 public/
   uc-logo.png           Logo mostrado en la web (provisional)
+  enac-logo.png         Logo de acreditación ENAC del pie del informe
 scripts/
   make-logo.py          Genera el logo provisional (Pillow)
   embed-logo.mjs        Incrusta public/uc-logo.png en lib/ucLogo.ts
+  embed-enac.mjs        Incrusta public/enac-logo.png en lib/enacLogo.ts
   make-sample.mjs       Crea samples/ejemplo.xlsx para pruebas
   inspect-excel.mjs     Inspector: imprime hojas y contenido de un Excel
   make-guia.mjs         Genera docs/Guia-de-uso.docx (guía para el cliente)
@@ -107,15 +121,18 @@ URL de la aplicación y el contacto de soporte, y vuelve a ejecutarlo.
 
 También puede desplegarse desde terminal con `npx vercel`.
 
-## Sustituir el logo provisional
+## Logotipos del informe
 
-El logo actual es un marcador de posición generado con `scripts/make-logo.py`.
-Cuando tengas el logotipo oficial (PNG, idealmente con fondo transparente):
+- **Cabecera (LaRUC):** se compone como texto en `lib/word.ts` porque el logo
+  oficial es un EMF que `docx` no puede incrustar. Si dispones de un PNG del
+  logotipo LaRUC, puede añadirse de forma análoga al de ENAC (ver abajo).
+- **Pie (ENAC):** el logo de acreditación va incrustado en `lib/enacLogo.ts`.
+  Para cambiarlo, sustituye `public/enac-logo.png` y ejecuta
+  `npm run embed-enac`.
+- **Logo UC de la web:** sustituye `public/uc-logo.png` y ejecuta
+  `npm run embed-logo` (regenera `lib/ucLogo.ts`).
 
-1. Sustituye `public/uc-logo.png` por el archivo oficial.
-2. Ejecuta `npm run embed-logo` (regenera `lib/ucLogo.ts`, que es el logo que
-   se incrusta en el Word).
-3. Haz commit de ambos archivos.
+Tras cambiar cualquier logo, haz commit del PNG y del `.ts` regenerado.
 
 ## Límites actuales
 
