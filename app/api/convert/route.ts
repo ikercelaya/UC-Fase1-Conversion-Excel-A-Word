@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { extractRadonSamples, parseWorkbook, RadonData, WorkbookData } from "@/lib/excel";
-import { buildRadonReport, buildReport } from "@/lib/word";
+import { extractRadonSamples, parseWorkbook } from "@/lib/excel";
+import { buildCombinedReport, CombinedReportFile } from "@/lib/word";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -8,6 +8,7 @@ export const maxDuration = 60;
 const ACCEPTED_EXTENSIONS = [".xlsx", ".xls", ".xlsm", ".csv"];
 
 // Vercel limita el cuerpo de la petición a 4,5 MB en funciones serverless.
+// El límite se aplica al conjunto de archivos (todo va en la misma petición).
 const MAX_SIZE_BYTES = 4 * 1024 * 1024;
 
 export async function POST(request: NextRequest) {
@@ -21,65 +22,79 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const file = form.get("file");
-  if (!(file instanceof File)) {
+  // Se aceptan varios archivos en el campo "file"; se combinan en un único Word.
+  const uploads = form.getAll("file").filter((entry): entry is File => entry instanceof File);
+  if (uploads.length === 0) {
     return NextResponse.json(
-      { error: 'No se ha recibido ningún archivo. Adjunta un Excel en el campo "file".' },
+      { error: 'No se ha recibido ningún archivo. Adjunta uno o varios Excel en el campo "file".' },
       { status: 400 },
     );
   }
 
-  const extension = `.${(file.name.split(".").pop() ?? "").toLowerCase()}`;
-  if (!ACCEPTED_EXTENSIONS.includes(extension)) {
-    return NextResponse.json(
-      { error: `Formato no admitido (${extension}). Formatos válidos: ${ACCEPTED_EXTENSIONS.join(", ")}.` },
-      { status: 400 },
-    );
+  for (const upload of uploads) {
+    const extension = `.${(upload.name.split(".").pop() ?? "").toLowerCase()}`;
+    if (!ACCEPTED_EXTENSIONS.includes(extension)) {
+      return NextResponse.json(
+        {
+          error: `Formato no admitido en "${upload.name}" (${extension}). Formatos válidos: ${ACCEPTED_EXTENSIONS.join(", ")}.`,
+        },
+        { status: 400 },
+      );
+    }
   }
 
-  if (file.size > MAX_SIZE_BYTES) {
+  const totalSize = uploads.reduce((sum, upload) => sum + upload.size, 0);
+  if (totalSize > MAX_SIZE_BYTES) {
     return NextResponse.json(
-      { error: "El archivo supera el límite de 4 MB." },
+      { error: "El conjunto de archivos supera el límite de 4 MB." },
       { status: 413 },
     );
   }
 
-  // Extracción específica del formato del laboratorio (radón); si el archivo
-  // no tiene ese formato, se vuelca el contenido completo de todas las hojas.
-  let radon: RadonData | null = null;
-  let workbook: WorkbookData | null = null;
+  // Extracción específica del formato del laboratorio (radón) por archivo; si un
+  // archivo no tiene ese formato, se vuelca su contenido completo.
+  const files: CombinedReportFile[] = [];
   try {
-    const buffer = Buffer.from(await file.arrayBuffer());
-    radon = extractRadonSamples(buffer);
-    if (!radon) workbook = parseWorkbook(buffer);
+    for (const upload of uploads) {
+      const buffer = Buffer.from(await upload.arrayBuffer());
+      const radon = extractRadonSamples(buffer);
+      const workbook = radon ? null : parseWorkbook(buffer);
+
+      if (!radon && (!workbook || workbook.sheets.length === 0)) {
+        return NextResponse.json(
+          { error: `El archivo "${upload.name}" no contiene ninguna hoja.` },
+          { status: 422 },
+        );
+      }
+
+      files.push({
+        sourceFileName: upload.name,
+        reportNumber: extractReportNumber(upload.name),
+        radon,
+        workbook,
+      });
+    }
   } catch {
     return NextResponse.json(
-      { error: "No se pudo leer el archivo. Comprueba que es un Excel válido y sin contraseña." },
-      { status: 422 },
-    );
-  }
-
-  if (!radon && (!workbook || workbook.sheets.length === 0)) {
-    return NextResponse.json(
-      { error: "El archivo no contiene ninguna hoja." },
+      {
+        error:
+          "No se pudo leer alguno de los archivos. Comprueba que son Excel válidos y sin contraseña.",
+      },
       { status: 422 },
     );
   }
 
   const generatedAt = new Date();
-  const docxBuffer = radon
-    ? await buildRadonReport({
-        data: radon,
-        sourceFileName: file.name,
-        generatedAt,
-        reportNumber: extractReportNumber(file.name),
-      })
-    : await buildReport({
-        data: workbook!,
-        sourceFileName: file.name,
-        generatedAt,
-      });
-  const fileName = buildFileName(file.name, generatedAt);
+  const docxBuffer = await buildCombinedReport({ files, generatedAt });
+  const fileName = buildFileName(
+    uploads.map((upload) => upload.name),
+    generatedAt,
+  );
+
+  const sampleCount = files.reduce((sum, file) => sum + (file.radon?.samples.length ?? 0), 0);
+  const anyRadon = files.some((file) => file.radon);
+  const anyVolcado = files.some((file) => !file.radon);
+  const mode = anyRadon && anyVolcado ? "mixto" : anyRadon ? "radon" : "volcado";
 
   return new NextResponse(new Uint8Array(docxBuffer), {
     status: 200,
@@ -87,8 +102,9 @@ export async function POST(request: NextRequest) {
       "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "Content-Disposition": `attachment; filename="${fileName}"`,
       "Cache-Control": "no-store",
-      "X-Report-Mode": radon ? "radon" : "volcado",
-      "X-Sample-Count": String(radon ? radon.samples.length : 0),
+      "X-Report-Mode": mode,
+      "X-Sample-Count": String(sampleCount),
+      "X-File-Count": String(files.length),
     },
   });
 }
@@ -99,8 +115,12 @@ function extractReportNumber(name: string): string {
   return match ? match[1] : "";
 }
 
-/** Nombre del informe: Informe_<archivo>_<fecha>_<hora>.docx (hora peninsular). */
-function buildFileName(sourceName: string, date: Date): string {
+/**
+ * Nombre del informe: Informe_<archivo|N_archivos>_<fecha>_<hora>.docx
+ * (hora peninsular). Con un solo archivo usa su nombre; con varios, el número
+ * de archivos.
+ */
+function buildFileName(sourceNames: string[], date: Date): string {
   const parts = new Intl.DateTimeFormat("es-ES", {
     timeZone: "Europe/Madrid",
     year: "numeric",
@@ -118,7 +138,9 @@ function buildFileName(sourceName: string, date: Date): string {
     }, {});
 
   const stamp = `${parts.year}-${parts.month}-${parts.day}_${parts.hour}-${parts.minute}-${parts.second}`;
-  return `Informe_${sanitizeBaseName(sourceName)}_${stamp}.docx`;
+  const base =
+    sourceNames.length === 1 ? sanitizeBaseName(sourceNames[0]) : `${sourceNames.length}_archivos`;
+  return `Informe_${base}_${stamp}.docx`;
 }
 
 /** Limpia el nombre del archivo origen para usarlo en el nombre del informe. */

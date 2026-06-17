@@ -106,6 +106,33 @@ h1 {
   font-size: 13px;
 }
 
+.filelist {
+  margin-top: 14px;
+}
+
+.filelist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.clear {
+  border: none;
+  background: none;
+  color: var(--uc);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.clear:hover {
+  text-decoration: underline;
+}
+
 .filecard {
   display: flex;
   align-items: center;
@@ -114,7 +141,7 @@ h1 {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px 14px;
-  margin-top: 14px;
+  margin-top: 8px;
 }
 
 .filename {

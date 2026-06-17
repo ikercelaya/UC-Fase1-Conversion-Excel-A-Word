@@ -42,9 +42,23 @@ const LANDSCAPE_COLUMN_THRESHOLD = 7;
 /** Celdas que parecen numéricas (importes, porcentajes…) se alinean a la derecha. */
 const NUMERIC_PATTERN = /^-?(?:\d{1,3}(?:[.,\s]\d{3})*|\d+)(?:[.,]\d+)?\s*(?:%|€)?$/;
 
-export interface ReportInput {
-  data: WorkbookData;
+/**
+ * Un archivo Excel ya procesado. O bien tiene el formato del laboratorio
+ * (radón) o se vuelca su contenido completo. Cada archivo conserva su nombre
+ * de origen y su nº de informe, que se usa para la REFERENCIA UC.
+ */
+export interface CombinedReportFile {
   sourceFileName: string;
+  /** Nº de informe derivado del nombre del archivo ("" si no se pudo). */
+  reportNumber: string;
+  /** Datos de radón si el archivo tiene el formato del laboratorio. */
+  radon: RadonData | null;
+  /** Volcado completo si el archivo no tiene el formato del laboratorio. */
+  workbook: WorkbookData | null;
+}
+
+export interface CombinedReportInput {
+  files: CombinedReportFile[];
   generatedAt: Date;
 }
 
@@ -75,29 +89,69 @@ function pageProperties(landscape: boolean) {
   };
 }
 
-/** Construye el informe de volcado completo y lo devuelve como buffer .docx. */
-export async function buildReport({ data, sourceFileName, generatedAt }: ReportInput): Promise<Buffer> {
-  const landscape = data.sheets.some((sheet) => sheet.columnCount >= LANDSCAPE_COLUMN_THRESHOLD);
+/**
+ * Construye un único informe Word a partir de uno o varios archivos Excel.
+ * Cada archivo aporta sus detectores (formato radón LaRUC) o el volcado de sus
+ * hojas, y todo se concatena en un mismo documento. El resultado se devuelve
+ * como buffer .docx.
+ */
+export async function buildCombinedReport({
+  files,
+  generatedAt,
+}: CombinedReportInput): Promise<Buffer> {
+  const multiple = files.length > 1;
+  const anyRadon = files.some((file) => file.radon);
+  const anyVolcado = files.some((file) => !file.radon && file.workbook);
+  const allRadon = anyRadon && !anyVolcado;
+  const allVolcado = anyVolcado && !anyRadon;
+
+  // El documento es horizontal si algún volcado tiene muchas columnas.
+  const landscape = files.some((file) =>
+    file.workbook?.sheets.some((sheet) => sheet.columnCount >= LANDSCAPE_COLUMN_THRESHOLD),
+  );
+
+  const children: (Paragraph | Table)[] = [
+    ...buildCombinedCover(files, generatedAt, { allRadon, allVolcado }),
+  ];
+
+  // La leyenda (notas (1) y (2)) se muestra una sola vez, antes del primer
+  // archivo de radón.
+  let legendShown = false;
+  files.forEach((file, index) => {
+    const startNewPage = index > 0;
+    if (file.radon) {
+      children.push(buildRadonHeading(file, multiple, startNewPage));
+      if (!legendShown) {
+        children.push(...buildRadonLegend());
+        legendShown = true;
+      }
+      children.push(...buildRadonTables(file));
+    } else if (file.workbook) {
+      children.push(...buildWorkbookBlocks(file, multiple, startNewPage));
+    }
+  });
 
   const document = new Document({
     creator: "Universidad de Cantabria",
-    title: `Informe de datos — ${sourceFileName}`,
-    description: "Informe generado automáticamente a partir de un archivo Excel",
+    title: buildDocumentTitle(files),
+    description: "Informe generado automáticamente a partir de archivos Excel",
     styles: documentStyles(),
     sections: [
       {
         properties: pageProperties(landscape),
         headers: { default: buildHeader() },
         footers: { default: buildFooter() },
-        children: [
-          ...buildCover(sourceFileName, generatedAt, data),
-          ...data.sheets.flatMap((sheet, index) => buildSheetSection(sheet, index)),
-        ],
+        children,
       },
     ],
   });
 
   return Packer.toBuffer(document);
+}
+
+function buildDocumentTitle(files: CombinedReportFile[]): string {
+  if (files.length === 1) return `Informe — ${files[0].sourceFileName}`;
+  return `Informe — ${files.length} archivos`;
 }
 
 /** Cabecera de página: logo UC con una línea corporativa debajo. */
@@ -148,35 +202,51 @@ function buildFooter(): Footer {
   });
 }
 
-/** Portada: título del informe y metadatos de la generación. */
-function buildCover(sourceFileName: string, generatedAt: Date, data: WorkbookData): Paragraph[] {
+/** Portada: título del informe y metadatos de la generación (uno o varios archivos). */
+function buildCombinedCover(
+  files: CombinedReportFile[],
+  generatedAt: Date,
+  { allRadon, allVolcado }: { allRadon: boolean; allVolcado: boolean },
+): Paragraph[] {
   const formattedDate = new Intl.DateTimeFormat("es-ES", {
     dateStyle: "long",
     timeStyle: "medium",
     timeZone: "Europe/Madrid",
   }).format(generatedAt);
 
-  const metadata: Array<[string, string]> = [
-    ["Archivo de origen", sourceFileName],
-    ["Fecha de generación", formattedDate],
-    ["Hojas procesadas", String(data.sheets.length)],
-    ["Filas de datos", data.totalRows.toLocaleString("es-ES")],
-  ];
+  const title = allRadon ? "Informe de ensayo" : allVolcado ? "Informe de datos" : "Informe";
+  const subtitle = allRadon
+    ? "Determinación de la exposición a radón en aire"
+    : allVolcado
+      ? "Extracción completa del contenido de los archivos Excel"
+      : "Resultados de radón y volcado de datos";
 
-  return [
+  const totalDetectores = files.reduce((sum, file) => sum + (file.radon?.samples.length ?? 0), 0);
+  const totalHojas = files.reduce((sum, file) => sum + (file.workbook?.sheets.length ?? 0), 0);
+  const totalFilas = files.reduce((sum, file) => sum + (file.workbook?.totalRows ?? 0), 0);
+
+  const metadata: Array<[string, string]> = [];
+  if (files.length === 1) {
+    metadata.push(["Archivo de origen", files[0].sourceFileName]);
+    if (files[0].reportNumber) metadata.push(["Nº de informe", files[0].reportNumber]);
+  } else {
+    metadata.push(["Archivos de origen", files.length.toLocaleString("es-ES")]);
+  }
+  metadata.push(["Fecha de generación", formattedDate]);
+  if (totalDetectores > 0) {
+    metadata.push(["Detectores procesados", totalDetectores.toLocaleString("es-ES")]);
+  }
+  if (totalHojas > 0) metadata.push(["Hojas procesadas", totalHojas.toLocaleString("es-ES")]);
+  if (totalFilas > 0) metadata.push(["Filas de datos", totalFilas.toLocaleString("es-ES")]);
+
+  const paragraphs: Paragraph[] = [
     new Paragraph({
       spacing: { before: 120, after: 60 },
-      children: [new TextRun({ text: "Informe de datos", size: 52, bold: true, color: INK })],
+      children: [new TextRun({ text: title, size: 52, bold: true, color: INK })],
     }),
     new Paragraph({
       spacing: { after: 280 },
-      children: [
-        new TextRun({
-          text: "Extracción completa del contenido del archivo Excel",
-          size: 22,
-          color: MUTED,
-        }),
-      ],
+      children: [new TextRun({ text: subtitle, size: 22, color: MUTED })],
     }),
     ...metadata.map(
       ([label, value]) =>
@@ -189,14 +259,42 @@ function buildCover(sourceFileName: string, generatedAt: Date, data: WorkbookDat
         }),
     ),
   ];
+
+  // Con varios archivos, se lista cada uno con su nº de detectores u hojas.
+  if (files.length > 1) {
+    paragraphs.push(
+      new Paragraph({
+        spacing: { before: 160, after: 40 },
+        children: [new TextRun({ text: "Archivos incluidos", bold: true })],
+      }),
+      ...files.map((file, index) => {
+        const detail = file.radon
+          ? `${file.radon.samples.length} detectores${file.reportNumber ? ` · nº ${file.reportNumber}` : ""}`
+          : `${file.workbook?.sheets.length ?? 0} hojas`;
+        return new Paragraph({
+          spacing: { after: 20 },
+          children: [
+            new TextRun({ text: `${index + 1}. ${file.sourceFileName}  ` }),
+            new TextRun({ text: `(${detail})`, size: 18, color: MUTED }),
+          ],
+        });
+      }),
+    );
+  }
+
+  return paragraphs;
 }
 
 /** Sección de una hoja: título, resumen y tabla con todos los datos. */
-function buildSheetSection(sheet: SheetData, index: number): (Paragraph | Table)[] {
+function buildSheetSection(
+  sheet: SheetData,
+  index: number,
+  pageBreakBefore = true,
+): (Paragraph | Table)[] {
   const blocks: (Paragraph | Table)[] = [
     new Paragraph({
       heading: HeadingLevel.HEADING_1,
-      pageBreakBefore: true,
+      pageBreakBefore,
       children: [new TextRun(`Hoja ${index + 1} · ${sheet.name}`)],
     }),
   ];
@@ -314,107 +412,58 @@ function buildCellParagraphs(text: string): Paragraph[] {
 // Informe de ensayo de radón (tabla por detector, formato del laboratorio)
 // ---------------------------------------------------------------------------
 
-export interface RadonReportInput {
-  data: RadonData;
-  sourceFileName: string;
-  generatedAt: Date;
-  /** Nº de informe derivado del nombre del archivo ("" si no se pudo). */
-  reportNumber: string;
-}
-
 // Anchos de columna del informe original del laboratorio (twips).
 const RADON_COLUMNS = [2345, 1985, 2058, 3137];
 const RADON_TABLE_WIDTH = RADON_COLUMNS.reduce((sum, width) => sum + width, 0);
 const RADON_VALUE_SPAN_WIDTH = RADON_COLUMNS[1] + RADON_COLUMNS[2] + RADON_COLUMNS[3];
 
-/** Construye el informe de ensayo de radón y lo devuelve como buffer .docx. */
-export async function buildRadonReport({
-  data,
-  sourceFileName,
-  generatedAt,
-  reportNumber,
-}: RadonReportInput): Promise<Buffer> {
-  const document = new Document({
-    creator: "Universidad de Cantabria",
-    title: `Informe de ensayo — ${sourceFileName}`,
-    description: "Informe de ensayo generado automáticamente a partir del Excel de medidas",
-    styles: documentStyles(),
-    sections: [
-      {
-        properties: pageProperties(false),
-        headers: { default: buildHeader() },
-        footers: { default: buildFooter() },
-        children: [
-          ...buildRadonCover(sourceFileName, generatedAt, data, reportNumber),
-          new Paragraph({
-            heading: HeadingLevel.HEADING_1,
-            children: [new TextRun("Resultados por detector")],
-          }),
-          ...buildRadonLegend(),
-          ...data.samples.flatMap((sample, index) => [
-            buildSampleTable(sample, referenciaUC(reportNumber, index + 1)),
-            // separador: evita que Word funda tablas consecutivas
-            new Paragraph({ spacing: { before: 60, after: 60 }, children: [] }),
-          ]),
-        ],
-      },
-    ],
+/** Encabezado de un archivo de radón: nombre del archivo, o título genérico si es uno solo. */
+function buildRadonHeading(
+  file: CombinedReportFile,
+  multiple: boolean,
+  startNewPage: boolean,
+): Paragraph {
+  const text = multiple ? file.sourceFileName : "Resultados por detector";
+  return new Paragraph({
+    heading: HeadingLevel.HEADING_1,
+    pageBreakBefore: startNewPage,
+    children: [new TextRun(text)],
   });
+}
 
-  return Packer.toBuffer(document);
+/** Tablas de los detectores de un archivo (REFERENCIA UC secuencial con su nº de informe). */
+function buildRadonTables(file: CombinedReportFile): (Paragraph | Table)[] {
+  const samples = file.radon?.samples ?? [];
+  return samples.flatMap((sample, index) => [
+    buildSampleTable(sample, referenciaUC(file.reportNumber, index + 1)),
+    // separador: evita que Word funda tablas consecutivas
+    new Paragraph({ spacing: { before: 60, after: 60 }, children: [] }),
+  ]);
+}
+
+/** Bloques del volcado completo de un archivo: título del archivo (si hay varios) y una sección por hoja. */
+function buildWorkbookBlocks(
+  file: CombinedReportFile,
+  multiple: boolean,
+  startNewPage: boolean,
+): (Paragraph | Table)[] {
+  const sheets = file.workbook?.sheets ?? [];
+  if (!multiple) {
+    return sheets.flatMap((sheet, index) => buildSheetSection(sheet, index));
+  }
+  return [
+    new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      pageBreakBefore: startNewPage,
+      children: [new TextRun(file.sourceFileName)],
+    }),
+    ...sheets.flatMap((sheet, index) => buildSheetSection(sheet, index, index > 0)),
+  ];
 }
 
 /** REFERENCIA UC secuencial (P-<informe>-TRA-<n>), como en los informes del laboratorio. */
 function referenciaUC(reportNumber: string, position: number): string {
   return reportNumber ? `P-${reportNumber}-TRA-${position}` : "";
-}
-
-function buildRadonCover(
-  sourceFileName: string,
-  generatedAt: Date,
-  data: RadonData,
-  reportNumber: string,
-): Paragraph[] {
-  const formattedDate = new Intl.DateTimeFormat("es-ES", {
-    dateStyle: "long",
-    timeStyle: "medium",
-    timeZone: "Europe/Madrid",
-  }).format(generatedAt);
-
-  const metadata: Array<[string, string]> = [
-    ["Archivo de origen", sourceFileName],
-    ...(reportNumber ? ([["Nº de informe", reportNumber]] as Array<[string, string]>) : []),
-    ["Fecha de generación", formattedDate],
-    ["Hoja de origen", data.sheetName],
-    ["Detectores procesados", data.samples.length.toLocaleString("es-ES")],
-  ];
-
-  return [
-    new Paragraph({
-      spacing: { before: 120, after: 60 },
-      children: [new TextRun({ text: "Informe de ensayo", size: 52, bold: true, color: INK })],
-    }),
-    new Paragraph({
-      spacing: { after: 280 },
-      children: [
-        new TextRun({
-          text: "Determinación de la exposición a radón en aire",
-          size: 22,
-          color: MUTED,
-        }),
-      ],
-    }),
-    ...metadata.map(
-      ([label, value]) =>
-        new Paragraph({
-          spacing: { after: 40 },
-          children: [
-            new TextRun({ text: `${label}:  `, bold: true }),
-            new TextRun({ text: value }),
-          ],
-        }),
-    ),
-  ];
 }
 
 /** Notas (1) y (2) del informe original más el aviso de campos no disponibles. */
