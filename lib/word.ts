@@ -18,6 +18,7 @@ import {
   TableLayoutType,
   TableRow,
   TextRun,
+  UnderlineType,
   VerticalAlign,
   WidthType,
 } from "docx";
@@ -325,63 +326,116 @@ function buildTitlePage(): Paragraph[] {
 }
 
 /**
- * Página 2: datos del informe siguiendo la plantilla del laboratorio. Los datos
- * del cliente y de las muestras se dejan en blanco para rellenarlos a mano;
- * solo se incluyen los textos fijos de la plantilla.
+ * Página 2: datos del informe siguiendo la plantilla del laboratorio.
+ * Los datos que no llegan desde el Excel se dejan como marcadores "xx".
  */
 function buildDataPage(): Paragraph[] {
   return [
     new Paragraph({
       pageBreakBefore: true, // empieza en una página nueva (la 2)
-      spacing: { after: 160 },
+      spacing: { before: 560, after: 220, line: 240 },
       children: [
         new TextRun({
           text: "DETERMINACIÓN DE LA CONCENTRACIÓN DE RADÓN EN AIRE.",
           bold: true,
-          size: 22,
+          font: "Arial",
+          size: 20,
           color: INK,
         }),
       ],
     }),
 
-    sectionHeading("Datos del cliente"),
-    bulletItem("Entidad:"),
-    bulletItem("Dirección:"),
-    bulletItem("Persona de contacto:"),
-    bulletItem("Tel:"),
-    bulletItem("Email:"),
+    dataSectionHeading("Datos del cliente"),
+    dataItem("Entidad:", "Laboratorio de Radiactividad Ambiental de la Universidad de Cantabria"),
+    dataItem("Dirección:", "c/ Cardenal Herrera Oria s/n"),
+    dataItem("Persona de contacto:", "Carlos Sainz Fernández"),
+    dataItem("Tel:", "(+34) 942 20 22 07"),
+    dataItem("Email:", [
+      new TextRun({
+        text: "laruc@unican.es",
+        font: "Arial",
+        size: 20,
+        color: "0563C1",
+        underline: { type: UnderlineType.SINGLE },
+      }),
+    ]),
 
-    sectionHeading("Objeto del informe"),
-    bulletItem("Ensayo a realizar:", ENSAYO_OBJETO),
-    bulletItem("Nº de detectores:"),
-    bulletItem("Nº de medidas realizadas:"),
+    dataSectionHeading("Objeto del informe"),
+    dataItem("Ensayo a realizar:", ENSAYO_OBJETO),
+    dataItem("Nº de detectores:", "xx"),
+    dataItem("Nº de medidas realizadas:", "xx"),
 
-    sectionHeading("Datos de las muestras objeto del ensayo"),
-    bulletItem("Los detectores han sido colocados por"),
-    bulletItem("Los detectores han sido recogidos por"),
-    bulletItem("Los detectores han sido aptos para su ensayo"),
-    bulletItem("Lugar de colocación del detector/es:"),
-    bulletItem("Fecha de colocación del detector/es:"),
-    bulletItem("Fecha de retirada del detector/es:"),
-    bulletItem("Fecha de recepción en el laboratorio:"),
-    bulletItem("Fecha inicio ensayo:"),
-    bulletItem("Fecha final ensayo:"),
+    dataSectionHeading("Datos de las muestras objeto del ensayo"),
+    dataItem("Los detectores han sido colocados por", "LaRUC"),
+    dataItem("Los detectores han sido recogidos por", "LaRUC"),
+    dataItem("Los detectores han sido aptos para su ensayo", "Sí"),
+    dataItem("Lugar de colocación del detector/es:", "xx"),
+    dataItem("Fecha de colocación del detector/es:", "xx/xx/2025"),
+    dataItem("Fecha de retirada del detector/es:", "xx/xx/2025"),
+    dataItem("Fecha de recepción en el laboratorio:", "xx/xx/2025"),
+    dataItem("Fecha inicio ensayo:", "xx/xx/2025"),
+    dataItem("Fecha final ensayo:", "xx/xx/2025"),
 
-    sectionHeading("Método de ensayo"),
-    bulletItem("Lugar de realización del ensayo:"),
-    bulletItem("Método de ensayo empleado:"),
+    dataSectionHeading("Método de ensayo"),
+    dataItem("Lugar de realización del ensayo:", "Instalaciones de LaRUC"),
+    dataItem(
+      "Método de ensayo empleado:",
+      "El método empleado ha sido el que se recoge en la documentación de calidad del laboratorio referencia I-Ens01_10.",
+    ),
 
-    sectionHeading("Normativa que afecta a este ensayo"),
-    plainItem("ISO 11665-4"),
+    dataSectionHeading("Normativa que afecta a este ensayo"),
+    highlightedDataItem("ISO 11665-4 / CTE / IS-47"),
 
-    sectionHeading("Incidencias durante la captación, retirada, transporte y/o ensayo"),
+    dataSectionHeading("Incidencias durante la captación, retirada, transporte y/o ensayo"),
     plainItem("No aplica."),
 
-    new Paragraph({
-      spacing: { before: 160, after: 80 },
-      children: [new TextRun({ text: ACREDITACION, bold: true })],
-    }),
+    dataSectionHeading(ACREDITACION),
   ];
+}
+
+function dataTextRun(text: string, bold = false): TextRun {
+  return new TextRun({ text, font: "Arial", bold, size: 20, color: INK });
+}
+
+function dataSectionHeading(text: string): Paragraph {
+  return new Paragraph({
+    indent: { left: 360, hanging: 240 },
+    spacing: { before: 160, after: 80, line: 240 },
+    keepNext: true,
+    children: [dataTextRun("▪  ", true), dataTextRun(text, true)],
+  });
+}
+
+function dataItem(label: string, value: string | TextRun[] = ""): Paragraph {
+  const runs = [dataTextRun("–  "), dataTextRun(label, true)];
+  if (Array.isArray(value)) {
+    if (value.length > 0) runs.push(dataTextRun(" "));
+    runs.push(...value);
+  } else if (value) {
+    runs.push(dataTextRun(` ${value}`));
+  }
+
+  return new Paragraph({
+    indent: { left: 920, hanging: 240 },
+    spacing: { after: 30, line: 240 },
+    children: runs,
+  });
+}
+
+function highlightedDataItem(text: string): Paragraph {
+  return new Paragraph({
+    indent: { left: 680 },
+    spacing: { after: 30, line: 240 },
+    children: [
+      new TextRun({
+        text,
+        font: "Arial",
+        size: 20,
+        color: INK,
+        highlight: "yellow",
+      }),
+    ],
+  });
 }
 
 /** Encabezado "Resultados obtenidos" y párrafo introductorio normalizado. */
@@ -390,16 +444,17 @@ function buildResultsIntro(): Paragraph[] {
     sectionHeading("Resultados obtenidos", true),
     new Paragraph({
       alignment: AlignmentType.JUSTIFIED,
-      spacing: { after: 160 },
+      spacing: { after: 160, line: 240 },
       children: [
         new TextRun({
           text:
             "Los resultados que contiene este informe solo afectan a los detectores sometidos a ensayo. " +
             "Las tablas siguientes contienen los resultados de la medida expresando la exposición en unidades kBq m",
+          font: "Arial",
           size: 20,
         }),
         sup("-3"),
-        new TextRun({ text: " h y la concentración en unidades Bq m", size: 20 }),
+        new TextRun({ text: " h y la concentración en unidades Bq m", font: "Arial", size: 20 }),
         sup("-3"),
         new TextRun({
           text:
@@ -408,6 +463,7 @@ function buildResultsIntro(): Paragraph[] {
             "y el resto de valores del apartado de resultados se expresan en coherencia con la incertidumbre. " +
             "Se sigue lo indicado en el documento 'Evaluation of measurement data — Guide to the expression of " +
             "uncertainty in measurement' (JCGM 100:2008 GUM 1995 with minor corrections).",
+          font: "Arial",
           size: 20,
         }),
       ],
@@ -454,29 +510,30 @@ function buildSignatureBox(): Table {
 function sectionHeading(text: string, pageBreakBefore = false): Paragraph {
   return new Paragraph({
     pageBreakBefore,
-    spacing: { before: 200, after: 60 },
+    indent: { left: 360, hanging: 240 },
+    spacing: { before: pageBreakBefore ? 560 : 200, after: 80, line: 240 },
     keepNext: true,
     children: [
-      new TextRun({ text: "▪  ", bold: true, color: UC_TEAL }),
-      new TextRun({ text, bold: true, size: 22, color: INK }),
+      new TextRun({ text: "▪  ", font: "Arial", bold: true, size: 20, color: INK }),
+      new TextRun({ text, font: "Arial", bold: true, size: 20, color: INK }),
     ],
   });
 }
 
 /** Punto "– etiqueta valor" con sangría (valor vacío = a rellenar a mano). */
 function bulletItem(label: string, value = ""): Paragraph {
-  const runs = [new TextRun({ text: "–  ", color: MUTED })];
-  if (label) runs.push(new TextRun({ text: label, bold: true }));
-  if (value) runs.push(new TextRun({ text: `${label ? " " : ""}${value}` }));
-  return new Paragraph({ indent: { left: 560 }, spacing: { after: 30 }, children: runs });
+  const runs = [new TextRun({ text: "–  ", font: "Arial", size: 20, color: INK })];
+  if (label) runs.push(new TextRun({ text: label, font: "Arial", bold: true, size: 20, color: INK }));
+  if (value) runs.push(new TextRun({ text: `${label ? " " : ""}${value}`, font: "Arial", size: 20, color: INK }));
+  return new Paragraph({ indent: { left: 920, hanging: 240 }, spacing: { after: 30, line: 240 }, children: runs });
 }
 
 /** Texto con sangría sin viñeta (p. ej. "ISO 11665-4", "No aplica."). */
 function plainItem(text: string): Paragraph {
   return new Paragraph({
-    indent: { left: 560 },
-    spacing: { after: 30 },
-    children: [new TextRun({ text })],
+    indent: { left: 680 },
+    spacing: { after: 30, line: 240 },
+    children: [new TextRun({ text, font: "Arial", size: 20, color: INK })],
   });
 }
 
@@ -485,7 +542,7 @@ function plainItem(text: string): Paragraph {
 // ---------------------------------------------------------------------------
 
 // Anchos de columna del informe original del laboratorio (twips).
-const RADON_COLUMNS = [2345, 1985, 2058, 3137];
+const RADON_COLUMNS = [2100, 1800, 2200, CONTENT_WIDTH - 6100];
 const RADON_TABLE_WIDTH = RADON_COLUMNS.reduce((sum, width) => sum + width, 0);
 const RADON_VALUE_SPAN_WIDTH = RADON_COLUMNS[1] + RADON_COLUMNS[2] + RADON_COLUMNS[3];
 
@@ -502,17 +559,17 @@ function buildSampleTable(sample: RadonSample, refUC: string): Table {
     layout: TableLayoutType.FIXED,
     margins: { top: 60, bottom: 60, left: 100, right: 100 },
     borders: {
-      top: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-      bottom: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-      left: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-      right: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-      insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: LINE },
-      insideVertical: { style: BorderStyle.SINGLE, size: 4, color: LINE },
+      top: { style: BorderStyle.SINGLE, size: 4, color: INK },
+      bottom: { style: BorderStyle.SINGLE, size: 4, color: INK },
+      left: { style: BorderStyle.SINGLE, size: 4, color: INK },
+      right: { style: BorderStyle.SINGLE, size: 4, color: INK },
+      insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: INK },
+      insideVertical: { style: BorderStyle.SINGLE, size: 4, color: INK },
     },
     rows: [
       labelValueRow("PROCEDENCIA", [], true),
-      labelValueRow("REFERENCIA", [new TextRun(sample.id)], true),
-      labelValueRow("REFERENCIA UC", refUC ? [new TextRun(refUC)] : [], true),
+      labelValueRow("REFERENCIA", valueRuns(sample.id), true),
+      labelValueRow("REFERENCIA UC", valueRuns(refUC), true),
       labelValueRow("FECHA COLOCACIÓN", valueRuns(sample.fechaColocacion), true),
       labelValueRow("FECHA RETIRADA", valueRuns(sample.fechaRetirada), true),
       pairRow(
@@ -541,21 +598,21 @@ function buildSampleTable(sample: RadonSample, refUC: string): Table {
 }
 
 function sup(text: string): TextRun {
-  return new TextRun({ text, superScript: true });
+  return new TextRun({ text, font: "Arial", size: 20, superScript: true });
 }
 
 /** Unidades de exposición: (kBq m⁻³ h). */
 function expUnitRuns(): TextRun[] {
-  return [new TextRun("(kBq m"), sup("-3"), new TextRun(" h)")];
+  return [new TextRun({ text: "(kBq m", font: "Arial", size: 20 }), sup("-3"), new TextRun({ text: " h)", font: "Arial", size: 20 })];
 }
 
 /** Unidades de concentración: (Bq m⁻³). */
 function concUnitRuns(): TextRun[] {
-  return [new TextRun("(Bq m"), sup("-3"), new TextRun(")")];
+  return [new TextRun({ text: "(Bq m", font: "Arial", size: 20 }), sup("-3"), new TextRun({ text: ")", font: "Arial", size: 20 })];
 }
 
 function valueRuns(value: string): TextRun[] {
-  return value ? [new TextRun(value)] : [];
+  return value ? [new TextRun({ text: value, font: "Arial", size: 20, color: INK })] : [];
 }
 
 function radonParagraph(
@@ -563,7 +620,7 @@ function radonParagraph(
   alignment: (typeof AlignmentType)[keyof typeof AlignmentType],
   keepNext: boolean,
 ): Paragraph {
-  return new Paragraph({ alignment, keepNext, children: runs });
+  return new Paragraph({ alignment, keepNext, spacing: { after: 0, line: 240 }, children: runs });
 }
 
 function radonCell(paragraphs: Paragraph[], width: number, span?: number): TableCell {
@@ -580,7 +637,7 @@ function labelValueRow(label: string, valueRuns: TextRun[], keepNext: boolean): 
   return new TableRow({
     cantSplit: true,
     children: [
-      radonCell([radonParagraph([new TextRun(label)], AlignmentType.LEFT, keepNext)], RADON_COLUMNS[0]),
+      radonCell([radonParagraph([new TextRun({ text: label, font: "Arial", size: 20, color: INK })], AlignmentType.LEFT, keepNext)], RADON_COLUMNS[0]),
       radonCell(
         [radonParagraph(valueRuns, AlignmentType.CENTER, keepNext)],
         RADON_VALUE_SPAN_WIDTH,
@@ -601,13 +658,13 @@ function pairRow(
   const labelCell = (label: string, units: TextRun[], width: number) =>
     radonCell(
       [
-        radonParagraph([new TextRun(label)], AlignmentType.LEFT, true),
-        radonParagraph(units, AlignmentType.LEFT, keepNext),
+        radonParagraph([new TextRun({ text: label, font: "Arial", size: 20, color: INK })], AlignmentType.CENTER, true),
+        radonParagraph(units, AlignmentType.CENTER, keepNext),
       ],
       width,
     );
   const valueCell = (value: string, width: number) =>
-    radonCell([radonParagraph(value ? [new TextRun(value)] : [], AlignmentType.CENTER, keepNext)], width);
+    radonCell([radonParagraph(valueRuns(value), AlignmentType.CENTER, keepNext)], width);
 
   return new TableRow({
     cantSplit: true,
