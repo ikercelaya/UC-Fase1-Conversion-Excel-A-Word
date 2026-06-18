@@ -163,7 +163,9 @@ function buildRadonSection(file: CombinedReportFile): ISectionOptions {
 /** Cabecera de página: marca LaRUC (izq.) y datos del laboratorio + nº de informe (der.). */
 function buildHeader(reportNumber: string): Header {
   const right = (runs: TextRun[]) =>
-    new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 0, line: 180 }, children: runs });
+    new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 0, line: 240 }, children: runs });
+  const headerRun = (text: string) =>
+    new TextRun({ text, font: "Arial", bold: true, size: 16, color: INK });
 
   return new Header({
     children: [
@@ -201,16 +203,28 @@ function buildHeader(reportNumber: string): Header {
                 verticalAlign: VerticalAlign.TOP,
                 children: [
                   right([
-                    new TextRun({ text: "Página ", size: 16, color: INK }),
-                    new TextRun({ children: [PageNumber.CURRENT], bold: true, size: 16, color: INK }),
-                    new TextRun({ text: " de ", size: 16, color: INK }),
-                    new TextRun({ children: [PageNumber.TOTAL_PAGES_IN_SECTION], bold: true, size: 16, color: INK }),
+                    headerRun("Página "),
+                    new TextRun({ children: [PageNumber.CURRENT], font: "Arial", bold: true, size: 16, color: INK }),
+                    headerRun(" de "),
+                    new TextRun({
+                      children: [PageNumber.TOTAL_PAGES_IN_SECTION],
+                      font: "Arial",
+                      bold: true,
+                      size: 16,
+                      color: INK,
+                    }),
                   ]),
                   ...LAB_DEPT_LINES.map((line) =>
-                    right([new TextRun({ text: line, bold: true, size: 16, color: INK })]),
+                    right([headerRun(line)]),
                   ),
                   right([
-                    new TextRun({ text: `Nº DE INFORME: ${reportNumber || ""}`, bold: true, size: 24, color: INK }),
+                    new TextRun({
+                      text: `Nº DE INFORME: ${reportNumber || ""}`,
+                      font: "Arial",
+                      bold: true,
+                      size: 24,
+                      color: INK,
+                    }),
                   ]),
                 ],
               }),
@@ -227,15 +241,15 @@ function buildFooter(): Footer {
   const legal = (text: string) =>
     new Paragraph({
       alignment: AlignmentType.LEFT,
-      spacing: { after: 0, line: 180 },
-      children: [new TextRun({ text, bold: true, size: 16, color: INK })],
+      spacing: { after: 0, line: 240 },
+      children: [new TextRun({ text, font: "Arial", bold: true, size: 16, color: INK })],
     });
 
   return new Footer({
     children: [
       new Table({
         width: { size: CONTENT_WIDTH, type: WidthType.DXA },
-        columnWidths: [CONTENT_WIDTH - 1604, 1604],
+        columnWidths: [1604, CONTENT_WIDTH - 1604],
         layout: TableLayoutType.FIXED,
         borders: noBorders(),
         rows: [
@@ -244,14 +258,9 @@ function buildFooter(): Footer {
               new TableCell({
                 borders: noBorders(),
                 verticalAlign: VerticalAlign.CENTER,
-                children: [legal(FOOTER_LINE_1), legal(FOOTER_LINE_2)],
-              }),
-              new TableCell({
-                borders: noBorders(),
-                verticalAlign: VerticalAlign.CENTER,
                 children: [
                   new Paragraph({
-                    alignment: AlignmentType.RIGHT,
+                    alignment: AlignmentType.LEFT,
                     spacing: { after: 0 },
                     children: [
                       new ImageRun({
@@ -267,6 +276,11 @@ function buildFooter(): Footer {
                     ],
                   }),
                 ],
+              }),
+              new TableCell({
+                borders: noBorders(),
+                verticalAlign: VerticalAlign.CENTER,
+                children: [legal(FOOTER_LINE_1), legal(FOOTER_LINE_2)],
               }),
             ],
           }),
