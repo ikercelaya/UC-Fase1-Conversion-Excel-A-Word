@@ -236,7 +236,7 @@ function buildHeader(reportNumber: string): Header {
   });
 }
 
-/** Pie de página: nota legal (izq.) y logo ENAC (der.). */
+/** Pie de página: logo ENAC (izq.) y nota legal (der.). */
 function buildFooter(): Footer {
   const legal = (text: string) =>
     new Paragraph({
@@ -248,9 +248,11 @@ function buildFooter(): Footer {
   return new Footer({
     children: [
       new Table({
-        width: { size: CONTENT_WIDTH, type: WidthType.DXA },
-        columnWidths: [1604, CONTENT_WIDTH - 1604],
+        width: { size: CONTENT_WIDTH + MARGIN.left, type: WidthType.DXA },
+        indent: { size: -MARGIN.left, type: WidthType.DXA },
+        columnWidths: [1604, CONTENT_WIDTH + MARGIN.left - 1604],
         layout: TableLayoutType.FIXED,
+        margins: { top: 0, bottom: 0, left: 0, right: 0 },
         borders: noBorders(),
         rows: [
           new TableRow({
@@ -280,6 +282,7 @@ function buildFooter(): Footer {
               new TableCell({
                 borders: noBorders(),
                 verticalAlign: VerticalAlign.CENTER,
+                margins: { top: 0, bottom: 0, left: 120, right: 0 },
                 children: [legal(FOOTER_LINE_1), legal(FOOTER_LINE_2)],
               }),
             ],
@@ -293,6 +296,8 @@ function buildFooter(): Footer {
 /** Página 1: portada con solo el título (centrado), debajo de la cabecera. */
 function buildTitlePage(): Paragraph[] {
   return [
+    new Paragraph({ children: [] }),
+    new Paragraph({ children: [] }),
     new Paragraph({ children: [] }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
@@ -382,7 +387,7 @@ function buildDataPage(): Paragraph[] {
 /** Encabezado "Resultados obtenidos" y párrafo introductorio normalizado. */
 function buildResultsIntro(): Paragraph[] {
   return [
-    sectionHeading("Resultados obtenidos"),
+    sectionHeading("Resultados obtenidos", true),
     new Paragraph({
       alignment: AlignmentType.JUSTIFIED,
       spacing: { after: 160 },
@@ -446,8 +451,9 @@ function buildSignatureBox(): Table {
 }
 
 /** Encabezado de sección con viñeta cuadrada (▪). */
-function sectionHeading(text: string): Paragraph {
+function sectionHeading(text: string, pageBreakBefore = false): Paragraph {
   return new Paragraph({
+    pageBreakBefore,
     spacing: { before: 200, after: 60 },
     keepNext: true,
     children: [
