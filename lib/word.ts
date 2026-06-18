@@ -472,7 +472,7 @@ function dataTextRun(text: string, bold = false): TextRun {
 function dataSectionHeading(text: string): Paragraph {
   return new Paragraph({
     indent: { left: 360, hanging: 240 },
-    spacing: { before: 160, after: 80, line: 480 },
+    spacing: { before: 160, after: 80, line: 360 },
     keepNext: true,
     children: [dataTextRun("▪  ", true), dataTextRun(text, true)],
   });
@@ -627,7 +627,7 @@ function sectionHeading(text: string, pageBreakBefore = false): Paragraph {
   return new Paragraph({
     pageBreakBefore,
     indent: { left: 720, hanging: 360 },
-    spacing: { before: pageBreakBefore ? 0 : 200, after: 80, line: 480 },
+    spacing: { before: pageBreakBefore ? 0 : 200, after: 80, line: 360 },
     keepNext: true,
     children: [
       new TextRun({ text: "▪  ", font: "Arial", bold: true, size: 20, color: INK }),
