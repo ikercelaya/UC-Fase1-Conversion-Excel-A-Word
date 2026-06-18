@@ -82,6 +82,7 @@ export default function Home() {
     setMessage("");
     try {
       const data = new FormData();
+      data.append("cliente", client);
       data.append("normativa", normativa);
       for (const file of files) data.append("file", file);
       const res = await fetch("/api/convert", { method: "POST", body: data });

@@ -40,7 +40,7 @@ const ENAC_LOGO_SIZE = 103;
 
 // A4 en twips
 const A4 = { width: 11906, height: 16838 };
-const MARGIN = { top: 1984, right: 1701, bottom: 1417, left: 1701, header: 708, footer: 708 };
+const MARGIN = { top: 2551, right: 1701, bottom: 1417, left: 1701, header: 708, footer: 708 };
 const CONTENT_WIDTH = A4.width - MARGIN.left - MARGIN.right; // 8504
 
 /** A partir de este número de columnas el volcado se genera en horizontal. */
@@ -58,6 +58,8 @@ const LAB_DEPT_LINES = [
 ];
 const ENSAYO_OBJETO =
   "Exposición y concentración de gas radón en aire a través de los análisis llevados a cabo en el Laboratorio de Radiactividad de la Universidad de Cantabria.";
+const ENSAYO_OBJETO_EXTERNO =
+  "Exposición de gas radón en aire a través de los análisis llevados a cabo en el laboratorio de radiactividad de la Universidad de Cantabria.";
 const ACREDITACION =
   "Laboratorio de ensayo acreditado por ENAC con acreditación Nº 1204/LE2219";
 const FOOTER_LINE_1 =
@@ -83,8 +85,11 @@ export interface CombinedReportFile {
 export interface CombinedReportInput {
   files: CombinedReportFile[];
   generatedAt: Date;
+  cliente: ReportClient;
   normativa: string;
 }
+
+export type ReportClient = "LaRUC" | "Externo";
 
 /** Estilos comunes a todos los informes. */
 function documentStyles() {
@@ -110,6 +115,7 @@ function documentStyles() {
 export async function buildCombinedReport({
   files,
   generatedAt,
+  cliente,
   normativa,
 }: CombinedReportInput): Promise<Buffer> {
   void generatedAt; // la fecha de emisión la rellena el laboratorio a mano
@@ -117,7 +123,7 @@ export async function buildCombinedReport({
   const radonFiles = files.filter((file) => file.radon);
   const volcadoFiles = files.filter((file) => !file.radon);
   const sections: ISectionOptions[] = [
-    ...(radonFiles.length > 0 ? [buildRadonSection(radonFiles, normativa)] : []),
+    ...(radonFiles.length > 0 ? [buildRadonSection(radonFiles, cliente, normativa)] : []),
     ...volcadoFiles.map((file) => buildVolcadoSection(file)),
   ];
 
@@ -139,7 +145,7 @@ export async function buildCombinedReport({
 // Sección de un informe de ensayo de radón (estructura oficial del laboratorio)
 // ---------------------------------------------------------------------------
 
-function buildRadonSection(files: CombinedReportFile[], normativa: string): ISectionOptions {
+function buildRadonSection(files: CombinedReportFile[], cliente: ReportClient, normativa: string): ISectionOptions {
   const reportNumber = files.find((file) => file.reportNumber)?.reportNumber ?? "";
   const samples = files.flatMap((file) => file.radon?.samples ?? []);
   return {
@@ -156,8 +162,8 @@ function buildRadonSection(files: CombinedReportFile[], normativa: string): ISec
       // Página 1: solo el título (portada). El resto va en la página 2.
       ...buildTitlePage(),
       // Página 2 en adelante: datos del informe, tablas y cierre con firma.
-      ...buildDataPage(normativa),
-      ...buildResultsIntro(),
+      ...buildDataPage(cliente, normativa),
+      ...buildResultsIntro(cliente),
       ...samples.flatMap((sample, index) => [
         buildSampleTable(sample, referenciaUC(reportNumber, index + 1)),
         new Paragraph({ spacing: { before: 120, after: 120 }, children: [] }),
@@ -335,21 +341,29 @@ function buildTitlePage(): Paragraph[] {
  * Página 2: datos del informe siguiendo la plantilla del laboratorio.
  * Los datos que no llegan desde el Excel se dejan como marcadores "xx".
  */
-function buildDataPage(normativa: string): Paragraph[] {
+function buildDataPage(cliente: ReportClient, normativa: string): Paragraph[] {
+  return cliente === "Externo" ? buildExternalDataPage(normativa) : buildLarucDataPage(normativa);
+}
+
+function dataPageTitle(text: string): Paragraph {
+  return new Paragraph({
+    pageBreakBefore: true, // empieza en una página nueva (la 2)
+    spacing: { before: 0, after: 220, line: 240 },
+    children: [
+      new TextRun({
+        text,
+        bold: true,
+        font: "Arial",
+        size: 20,
+        color: INK,
+      }),
+    ],
+  });
+}
+
+function buildLarucDataPage(normativa: string): Paragraph[] {
   return [
-    new Paragraph({
-      pageBreakBefore: true, // empieza en una página nueva (la 2)
-      spacing: { before: 560, after: 220, line: 240 },
-      children: [
-        new TextRun({
-          text: "DETERMINACIÓN DE LA CONCENTRACIÓN DE RADÓN EN AIRE.",
-          bold: true,
-          font: "Arial",
-          size: 20,
-          color: INK,
-        }),
-      ],
-    }),
+    dataPageTitle("DETERMINACIÓN de la CONCENTRACIÓN DE radón en aire."),
 
     dataSectionHeading("Datos del cliente"),
     dataItem("Entidad:", "Laboratorio de Radiactividad Ambiental de la Universidad de Cantabria"),
@@ -399,6 +413,58 @@ function buildDataPage(normativa: string): Paragraph[] {
   ];
 }
 
+function buildExternalDataPage(normativa: string): Paragraph[] {
+  return [
+    dataPageTitle("DETERMINACIÓN de la exposición de gas radón en aire."),
+
+    dataSectionHeading("Datos del cliente"),
+    dataItem("Entidad:"),
+    dataItem("Dirección:"),
+    dataItem("Persona de contacto:"),
+    dataItem("Tel:", "(+34)"),
+    dataItem("Email:"),
+
+    dataSectionHeading("Objeto del informe"),
+    dataItem("Ensayo a realizar:", ENSAYO_OBJETO_EXTERNO),
+    dataItem("Nº de detectores:", "xx"),
+    dataItem("Nº de medidas realizadas:", "xx"),
+
+    dataSectionHeading("Datos de las muestras objeto del ensayo"),
+    dataItem("Los detectores han sido colocados por", "CLIENTE (1)"),
+    dataItem("Los detectores han sido recogidos por", "CLIENTE (1)"),
+    dataItem("Los detectores han sido aptos para su ensayo", "Sí"),
+    dataPlainIndented(
+      "Para llevar a cabo la medida se informa al cliente mediante una instrucción (folleto) de la manera idónea de colocación en caso de que sea el interesado el que coloca los detectores.",
+      true,
+    ),
+    dataItem("Lugar de colocación del detector/es:", "(1)"),
+    dataItem("Fecha de colocación del detector/es:", "xx/xx/xxxx (1)"),
+    dataItem("Fecha de retirada del detector/es:", "xx/xx/xxxx (1)"),
+    dataItem("Fecha de recepción en el laboratorio:", "xx/xx/xxxx"),
+    dataItem("Fecha inicio ensayo:", "xx/xx/xxxx"),
+    dataItem("Fecha final ensayo:", "xx/xx/xxxx"),
+    dataPlainIndented(
+      "(1) El laboratorio no es responsable de la información aportada por el cliente relativa a la colocación, retirada y fechas relacionadas, que no está cubierta por la acreditación.",
+      true,
+    ),
+
+    dataSectionHeading("Método de ensayo"),
+    dataItem("Lugar de realización del ensayo:", "Instalaciones de LaRUC"),
+    dataItem(
+      "Método de ensayo empleado:",
+      "El método empleado ha sido el que se recoge en la documentación de calidad del laboratorio referencia I-Ens01_10.",
+    ),
+
+    dataSectionHeading("Normativa que afecta a este ensayo"),
+    highlightedDataItem(normativa),
+
+    dataSectionHeading("Incidencias durante la captación, retirada, transporte y/o ensayo"),
+    plainItem("No aplica."),
+
+    dataSectionHeading(ACREDITACION),
+  ];
+}
+
 function dataTextRun(text: string, bold = false): TextRun {
   return new TextRun({ text, font: "Arial", bold, size: 20, color: INK });
 }
@@ -428,6 +494,15 @@ function dataItem(label: string, value: string | TextRun[] = ""): Paragraph {
   });
 }
 
+function dataPlainIndented(text: string, bold = false): Paragraph {
+  return new Paragraph({
+    alignment: AlignmentType.JUSTIFIED,
+    indent: { left: 920 },
+    spacing: { after: 30, line: 240 },
+    children: [dataTextRun(text, bold)],
+  });
+}
+
 function highlightedDataItem(text: string): Paragraph {
   return new Paragraph({
     indent: { left: 680 },
@@ -445,36 +520,72 @@ function highlightedDataItem(text: string): Paragraph {
 }
 
 /** Encabezado "Resultados obtenidos" y párrafo introductorio normalizado. */
-function buildResultsIntro(): Paragraph[] {
+function buildResultsIntro(cliente: ReportClient): Paragraph[] {
+  const isExternal = cliente === "Externo";
   return [
     sectionHeading("Resultados obtenidos", true),
-    new Paragraph({
-      alignment: AlignmentType.JUSTIFIED,
-      spacing: { after: 420, line: 240 },
-      children: [
-        new TextRun({
-          text:
-            "Los resultados que contiene este informe solo afectan a los detectores sometidos a ensayo. " +
-            "Las tablas siguientes contienen los resultados de la medida expresando la exposición en unidades kBq m",
-          font: "Arial",
-          size: 20,
-        }),
-        sup("-3"),
-        new TextRun({ text: " h y la concentración en unidades Bq m", font: "Arial", size: 20 }),
-        sup("-3"),
-        new TextRun({
-          text:
-            ". Los resultados de incertidumbre de este informe de ensayo se corresponden con un factor de " +
-            "cobertura k = 2. Los valores de la incertidumbre aparecen expresados con dos cifras significativas " +
-            "y el resto de valores del apartado de resultados se expresan en coherencia con la incertidumbre. " +
-            "Se sigue lo indicado en el documento 'Evaluation of measurement data — Guide to the expression of " +
-            "uncertainty in measurement' (JCGM 100:2008 GUM 1995 with minor corrections).",
-          font: "Arial",
-          size: 20,
-        }),
-      ],
-    }),
+    resultsParagraph(resultsIntroRuns(), isExternal ? 120 : 420),
+    ...(isExternal
+      ? [
+          resultsParagraph(
+            [
+              new TextRun({
+                text: "Cláusula de descargo de responsabilidad",
+                font: "Arial",
+                size: 20,
+                underline: { type: UnderlineType.SINGLE },
+              }),
+              textRun(
+                ". La información incluida en este informe identificada como proporcionada por el cliente es responsabilidad única del mismo y dicha información no está cubierta por la acreditación.",
+              ),
+            ],
+            120,
+          ),
+          resultsParagraph([textRun("(1) La información ha sido proporcionada por el cliente.", true)], 80),
+          resultsParagraph(
+            [
+              textRun(
+                "(2) El resultado de la concentración se ha calculado según las fechas de exposición facilitadas por el cliente.",
+                true,
+              ),
+            ],
+            420,
+          ),
+        ]
+      : []),
   ];
+}
+
+function textRun(text: string, bold = false): TextRun {
+  return new TextRun({ text, font: "Arial", bold, size: 20, color: INK });
+}
+
+function resultsIntroRuns(): TextRun[] {
+  return [
+    textRun(
+      "Los resultados que contiene este informe solo afectan a los detectores sometidos a ensayo. " +
+        "Las tablas siguientes contienen los resultados de la medida expresando la exposición en unidades kBq m",
+    ),
+    sup("-3"),
+    textRun(" h y la concentración en unidades Bq m"),
+    sup("-3"),
+    textRun(
+      ". Los resultados de incertidumbre de este informe de ensayo se corresponden con un factor de " +
+        "cobertura k = 2. Los valores de la incertidumbre aparecen expresados con dos cifras significativas " +
+        "y el resto de valores del apartado de resultados se expresan en coherencia con la incertidumbre. " +
+        "Se sigue lo indicado en el documento 'Evaluation of measurement data — Guide to the expression of " +
+        "uncertainty in measurement' (JCGM 100:2008 GUM 1995 with minor corrections).",
+    ),
+  ];
+}
+
+function resultsParagraph(children: TextRun[], after: number): Paragraph {
+  return new Paragraph({
+    alignment: AlignmentType.JUSTIFIED,
+    indent: { left: 720 },
+    spacing: { after, line: 240 },
+    children,
+  });
 }
 
 /** Cierre del informe: "Fin del informe", la línea de firma y el recuadro vacío. */
@@ -516,8 +627,8 @@ function buildSignatureBox(): Table {
 function sectionHeading(text: string, pageBreakBefore = false): Paragraph {
   return new Paragraph({
     pageBreakBefore,
-    indent: { left: 360, hanging: 240 },
-    spacing: { before: pageBreakBefore ? 560 : 200, after: 80, line: 240 },
+    indent: { left: 720, hanging: 360 },
+    spacing: { before: pageBreakBefore ? 0 : 200, after: 80, line: 240 },
     keepNext: true,
     children: [
       new TextRun({ text: "▪  ", font: "Arial", bold: true, size: 20, color: INK }),

@@ -6,6 +6,8 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const ACCEPTED_EXTENSIONS = [".xlsx", ".xls", ".xlsm", ".csv"];
+const CLIENTES = ["LaRUC", "Externo"] as const;
+const DEFAULT_CLIENTE = CLIENTES[0];
 const NORMATIVAS = ["ISO11665-4", "CTE", "IS-47"] as const;
 const DEFAULT_NORMATIVA = NORMATIVAS[0];
 
@@ -26,6 +28,11 @@ export async function POST(request: NextRequest) {
 
   // Se aceptan varios archivos en el campo "file"; se combinan en un único Word.
   const uploads = form.getAll("file").filter((entry): entry is File => entry instanceof File);
+  const clienteValue = form.get("cliente");
+  const cliente =
+    typeof clienteValue === "string" && CLIENTES.includes(clienteValue as (typeof CLIENTES)[number])
+      ? (clienteValue as (typeof CLIENTES)[number])
+      : DEFAULT_CLIENTE;
   const normativaValue = form.get("normativa");
   const normativa =
     typeof normativaValue === "string" && NORMATIVAS.includes(normativaValue as (typeof NORMATIVAS)[number])
@@ -93,7 +100,7 @@ export async function POST(request: NextRequest) {
   }
 
   const generatedAt = new Date();
-  const docxBuffer = await buildCombinedReport({ files, generatedAt, normativa });
+  const docxBuffer = await buildCombinedReport({ files, generatedAt, cliente, normativa });
   const fileName = buildFileName(
     uploads.map((upload) => upload.name),
     generatedAt,
