@@ -472,7 +472,7 @@ function dataTextRun(text: string, bold = false): TextRun {
 function dataSectionHeading(text: string): Paragraph {
   return new Paragraph({
     indent: { left: 360, hanging: 240 },
-    spacing: { before: 160, after: 80, line: 240 },
+    spacing: { before: 160, after: 80, line: 480 },
     keepNext: true,
     children: [dataTextRun("▪  ", true), dataTextRun(text, true)],
   });
@@ -505,7 +505,7 @@ function dataPlainIndented(text: string, bold = false): Paragraph {
 
 function highlightedDataItem(text: string): Paragraph {
   return new Paragraph({
-    indent: { left: 680 },
+    indent: { left: 360 },
     spacing: { after: 30, line: 240 },
     children: [
       new TextRun({
@@ -513,7 +513,6 @@ function highlightedDataItem(text: string): Paragraph {
         font: "Arial",
         size: 20,
         color: INK,
-        highlight: "yellow",
       }),
     ],
   });
@@ -628,7 +627,7 @@ function sectionHeading(text: string, pageBreakBefore = false): Paragraph {
   return new Paragraph({
     pageBreakBefore,
     indent: { left: 720, hanging: 360 },
-    spacing: { before: pageBreakBefore ? 0 : 200, after: 80, line: 240 },
+    spacing: { before: pageBreakBefore ? 0 : 200, after: 80, line: 480 },
     keepNext: true,
     children: [
       new TextRun({ text: "▪  ", font: "Arial", bold: true, size: 20, color: INK }),
@@ -648,7 +647,7 @@ function bulletItem(label: string, value = ""): Paragraph {
 /** Texto con sangría sin viñeta (p. ej. "ISO 11665-4", "No aplica."). */
 function plainItem(text: string): Paragraph {
   return new Paragraph({
-    indent: { left: 680 },
+    indent: { left: 360 },
     spacing: { after: 30, line: 240 },
     children: [new TextRun({ text, font: "Arial", size: 20, color: INK })],
   });
