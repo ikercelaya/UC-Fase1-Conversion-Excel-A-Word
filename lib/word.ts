@@ -83,6 +83,7 @@ export interface CombinedReportFile {
 export interface CombinedReportInput {
   files: CombinedReportFile[];
   generatedAt: Date;
+  normativa: string;
 }
 
 /** Estilos comunes a todos los informes. */
@@ -109,11 +110,12 @@ function documentStyles() {
 export async function buildCombinedReport({
   files,
   generatedAt,
+  normativa,
 }: CombinedReportInput): Promise<Buffer> {
   void generatedAt; // la fecha de emisión la rellena el laboratorio a mano
 
   const sections: ISectionOptions[] = files.map((file) =>
-    file.radon ? buildRadonSection(file) : buildVolcadoSection(file),
+    file.radon ? buildRadonSection(file, normativa) : buildVolcadoSection(file),
   );
 
   const document = new Document({
@@ -134,7 +136,7 @@ export async function buildCombinedReport({
 // Sección de un informe de ensayo de radón (estructura oficial del laboratorio)
 // ---------------------------------------------------------------------------
 
-function buildRadonSection(file: CombinedReportFile): ISectionOptions {
+function buildRadonSection(file: CombinedReportFile, normativa: string): ISectionOptions {
   const samples = file.radon?.samples ?? [];
   return {
     properties: {
@@ -150,7 +152,7 @@ function buildRadonSection(file: CombinedReportFile): ISectionOptions {
       // Página 1: solo el título (portada). El resto va en la página 2.
       ...buildTitlePage(),
       // Página 2 en adelante: datos del informe, tablas y cierre con firma.
-      ...buildDataPage(),
+      ...buildDataPage(normativa),
       ...buildResultsIntro(),
       ...samples.flatMap((sample, index) => [
         buildSampleTable(sample, referenciaUC(file.reportNumber, index + 1)),
@@ -329,7 +331,7 @@ function buildTitlePage(): Paragraph[] {
  * Página 2: datos del informe siguiendo la plantilla del laboratorio.
  * Los datos que no llegan desde el Excel se dejan como marcadores "xx".
  */
-function buildDataPage(): Paragraph[] {
+function buildDataPage(normativa: string): Paragraph[] {
   return [
     new Paragraph({
       pageBreakBefore: true, // empieza en una página nueva (la 2)
@@ -384,7 +386,7 @@ function buildDataPage(): Paragraph[] {
     ),
 
     dataSectionHeading("Normativa que afecta a este ensayo"),
-    highlightedDataItem("ISO 11665-4 / CTE / IS-47"),
+    highlightedDataItem(normativa),
 
     dataSectionHeading("Incidencias durante la captación, retirada, transporte y/o ensayo"),
     plainItem("No aplica."),
@@ -542,7 +544,7 @@ function plainItem(text: string): Paragraph {
 // ---------------------------------------------------------------------------
 
 // Anchos de columna del informe original del laboratorio (twips).
-const RADON_COLUMNS = [2100, 1800, 2200, CONTENT_WIDTH - 6100];
+const RADON_COLUMNS = [2600, 1700, 2200, CONTENT_WIDTH - 6500];
 const RADON_TABLE_WIDTH = RADON_COLUMNS.reduce((sum, width) => sum + width, 0);
 const RADON_VALUE_SPAN_WIDTH = RADON_COLUMNS[1] + RADON_COLUMNS[2] + RADON_COLUMNS[3];
 
@@ -568,7 +570,7 @@ function buildSampleTable(sample: RadonSample, refUC: string): Table {
     },
     rows: [
       labelValueRow("PROCEDENCIA", [], true),
-      labelValueRow("REFERENCIA", valueRuns(sample.id), true),
+      labelValueRow("REFERENCIA", valueRuns(sample.id, true), true),
       labelValueRow("REFERENCIA UC", valueRuns(refUC), true),
       labelValueRow("FECHA COLOCACIÓN", valueRuns(sample.fechaColocacion), true),
       labelValueRow("FECHA RETIRADA", valueRuns(sample.fechaRetirada), true),
@@ -611,8 +613,8 @@ function concUnitRuns(): TextRun[] {
   return [new TextRun({ text: "(Bq m", font: "Arial", size: 20 }), sup("-3"), new TextRun({ text: ")", font: "Arial", size: 20 })];
 }
 
-function valueRuns(value: string): TextRun[] {
-  return value ? [new TextRun({ text: value, font: "Arial", size: 20, color: INK })] : [];
+function valueRuns(value: string, bold = false): TextRun[] {
+  return value ? [new TextRun({ text: value, font: "Arial", bold, size: 20, color: INK })] : [];
 }
 
 function radonParagraph(
@@ -639,7 +641,7 @@ function labelValueRow(label: string, valueRuns: TextRun[], keepNext: boolean): 
     children: [
       radonCell([radonParagraph([new TextRun({ text: label, font: "Arial", size: 20, color: INK })], AlignmentType.LEFT, keepNext)], RADON_COLUMNS[0]),
       radonCell(
-        [radonParagraph(valueRuns, AlignmentType.CENTER, keepNext)],
+        [radonParagraph(valueRuns, AlignmentType.LEFT, keepNext)],
         RADON_VALUE_SPAN_WIDTH,
         3,
       ),

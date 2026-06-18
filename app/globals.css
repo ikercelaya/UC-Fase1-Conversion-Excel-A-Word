@@ -70,8 +70,42 @@ h1 {
 
 .lead {
   color: var(--muted);
-  margin: 0 0 28px;
+  margin: 0 0 22px;
   line-height: 1.5;
+}
+
+.report-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field span {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.field select {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  padding: 9px 36px 9px 12px;
+}
+
+.field select:focus {
+  border-color: var(--uc);
+  outline: 3px solid rgba(13, 154, 169, 0.18);
 }
 
 .dropzone {
@@ -226,4 +260,10 @@ h1 {
   font-size: 12.5px;
   padding: 18px;
   border-top: 1px solid var(--line);
+}
+
+@media (max-width: 560px) {
+  .report-options {
+    grid-template-columns: 1fr;
+  }
 }

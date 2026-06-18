@@ -6,6 +6,8 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const ACCEPTED_EXTENSIONS = [".xlsx", ".xls", ".xlsm", ".csv"];
+const NORMATIVAS = ["ISO11665-4", "CTE", "IS-47"] as const;
+const DEFAULT_NORMATIVA = NORMATIVAS[0];
 
 // Vercel limita el cuerpo de la petición a 4,5 MB en funciones serverless.
 // El límite se aplica al conjunto de archivos (todo va en la misma petición).
@@ -24,6 +26,12 @@ export async function POST(request: NextRequest) {
 
   // Se aceptan varios archivos en el campo "file"; se combinan en un único Word.
   const uploads = form.getAll("file").filter((entry): entry is File => entry instanceof File);
+  const normativaValue = form.get("normativa");
+  const normativa =
+    typeof normativaValue === "string" && NORMATIVAS.includes(normativaValue as (typeof NORMATIVAS)[number])
+      ? normativaValue
+      : DEFAULT_NORMATIVA;
+
   if (uploads.length === 0) {
     return NextResponse.json(
       { error: 'No se ha recibido ningún archivo. Adjunta uno o varios Excel en el campo "file".' },
@@ -85,7 +93,7 @@ export async function POST(request: NextRequest) {
   }
 
   const generatedAt = new Date();
-  const docxBuffer = await buildCombinedReport({ files, generatedAt });
+  const docxBuffer = await buildCombinedReport({ files, generatedAt, normativa });
   const fileName = buildFileName(
     uploads.map((upload) => upload.name),
     generatedAt,

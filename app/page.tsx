@@ -5,6 +5,8 @@ import { useRef, useState } from "react";
 const MAX_SIZE_MB = 4; // límite del cuerpo de la petición en Vercel (4,5 MB), aplicado al conjunto
 const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
 const ACCEPTED = [".xlsx", ".xls", ".xlsm", ".csv"];
+const CLIENT_OPTIONS = ["LaRUC", "Externo"];
+const NORMATIVA_OPTIONS = ["ISO11665-4", "CTE", "IS-47"];
 
 type Status = "idle" | "working" | "done" | "error";
 
@@ -23,6 +25,8 @@ export default function Home() {
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [client, setClient] = useState(CLIENT_OPTIONS[0]);
+  const [normativa, setNormativa] = useState(NORMATIVA_OPTIONS[0]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   function addFiles(incoming: FileList | File[] | null | undefined) {
@@ -78,6 +82,7 @@ export default function Home() {
     setMessage("");
     try {
       const data = new FormData();
+      data.append("normativa", normativa);
       for (const file of files) data.append("file", file);
       const res = await fetch("/api/convert", { method: "POST", body: data });
 
@@ -144,6 +149,30 @@ export default function Home() {
           con la tabla de resultados de cada detector. Si algún archivo no tiene
           el formato del laboratorio, se volcará todo su contenido en tablas.
         </p>
+
+        <div className="report-options">
+          <label className="field">
+            <span>Selecciona el cliente</span>
+            <select value={client} onChange={(event) => setClient(event.target.value)}>
+              {CLIENT_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field">
+            <span>Selecciona la normativa</span>
+            <select value={normativa} onChange={(event) => setNormativa(event.target.value)}>
+              {NORMATIVA_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
 
         <section
           className={`dropzone${dragOver ? " over" : ""}`}
