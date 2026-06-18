@@ -40,7 +40,7 @@ const ENAC_LOGO_SIZE = 103;
 
 // A4 en twips
 const A4 = { width: 11906, height: 16838 };
-const MARGIN = { top: 1417, right: 1701, bottom: 1417, left: 1701, header: 708, footer: 708 };
+const MARGIN = { top: 1984, right: 1701, bottom: 1417, left: 1701, header: 708, footer: 708 };
 const CONTENT_WIDTH = A4.width - MARGIN.left - MARGIN.right; // 8504
 
 /** A partir de este número de columnas el volcado se genera en horizontal. */
@@ -103,9 +103,9 @@ function documentStyles() {
 
 /**
  * Construye un único informe Word a partir de uno o varios archivos Excel.
- * Cada archivo es un informe de ensayo completo (con su propia cabecera y nº
- * de informe), siguiendo la estructura oficial del laboratorio (LaRUC). El
- * resultado se devuelve como buffer .docx.
+ * Los archivos de radón se agrupan dentro de un único informe oficial LaRUC:
+ * portada, datos, todas las tablas y cierre. Los archivos fuera de ese formato
+ * conservan el volcado completo como secciones independientes.
  */
 export async function buildCombinedReport({
   files,
@@ -114,9 +114,12 @@ export async function buildCombinedReport({
 }: CombinedReportInput): Promise<Buffer> {
   void generatedAt; // la fecha de emisión la rellena el laboratorio a mano
 
-  const sections: ISectionOptions[] = files.map((file) =>
-    file.radon ? buildRadonSection(file, normativa) : buildVolcadoSection(file),
-  );
+  const radonFiles = files.filter((file) => file.radon);
+  const volcadoFiles = files.filter((file) => !file.radon);
+  const sections: ISectionOptions[] = [
+    ...(radonFiles.length > 0 ? [buildRadonSection(radonFiles, normativa)] : []),
+    ...volcadoFiles.map((file) => buildVolcadoSection(file)),
+  ];
 
   const document = new Document({
     creator: "Universidad de Cantabria · LaRUC",
@@ -136,8 +139,9 @@ export async function buildCombinedReport({
 // Sección de un informe de ensayo de radón (estructura oficial del laboratorio)
 // ---------------------------------------------------------------------------
 
-function buildRadonSection(file: CombinedReportFile, normativa: string): ISectionOptions {
-  const samples = file.radon?.samples ?? [];
+function buildRadonSection(files: CombinedReportFile[], normativa: string): ISectionOptions {
+  const reportNumber = files.find((file) => file.reportNumber)?.reportNumber ?? "";
+  const samples = files.flatMap((file) => file.radon?.samples ?? []);
   return {
     properties: {
       page: {
@@ -146,7 +150,7 @@ function buildRadonSection(file: CombinedReportFile, normativa: string): ISectio
         pageNumbers: { start: 1 }, // cada informe numera sus páginas desde 1
       },
     },
-    headers: { default: buildHeader(file.reportNumber) },
+    headers: { default: buildHeader(reportNumber) },
     footers: { default: buildFooter() },
     children: [
       // Página 1: solo el título (portada). El resto va en la página 2.
@@ -155,8 +159,8 @@ function buildRadonSection(file: CombinedReportFile, normativa: string): ISectio
       ...buildDataPage(normativa),
       ...buildResultsIntro(),
       ...samples.flatMap((sample, index) => [
-        buildSampleTable(sample, referenciaUC(file.reportNumber, index + 1)),
-        new Paragraph({ spacing: { before: 60, after: 60 }, children: [] }),
+        buildSampleTable(sample, referenciaUC(reportNumber, index + 1)),
+        new Paragraph({ spacing: { before: 120, after: 120 }, children: [] }),
       ]),
       ...buildClosing(),
     ],
@@ -446,7 +450,7 @@ function buildResultsIntro(): Paragraph[] {
     sectionHeading("Resultados obtenidos", true),
     new Paragraph({
       alignment: AlignmentType.JUSTIFIED,
-      spacing: { after: 160, line: 240 },
+      spacing: { after: 420, line: 240 },
       children: [
         new TextRun({
           text:
