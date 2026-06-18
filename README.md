@@ -45,9 +45,8 @@ Campos derivados o no disponibles:
   dígitos iniciales del nombre del archivo (`26024 (…).xlsx` → `26024`);
   si el nombre no empieza por dígitos, el campo queda en blanco.
 - **PROCEDENCIA** no existe en el Excel de medidas y se deja en blanco.
-- El **logotipo LaRUC** de la cabecera se compone como texto (el logo oficial
-  es un EMF que no se puede incrustar directamente); puede sustituirse más
-  adelante. El **logo ENAC** del pie sí va incrustado (ver más abajo).
+- El **logotipo LaRUC** de la cabecera y el **logo ENAC** del pie van
+  incrustados desde los JPG oficiales (ver más abajo).
 
 Si el archivo no tiene el formato del laboratorio, la herramienta hace un
 **volcado completo**: una sección por hoja con todos sus datos en tablas
@@ -73,14 +72,17 @@ lib/
   excel.ts              Extracción: bloques de radón (LaRUC) y volcado completo
   word.ts               Construcción del informe Word (estructura oficial LaRUC)
   ucLogo.ts             Logo UC incrustado en base64 (generado, no editar a mano)
+  larucLogo.ts          Logo LaRUC de cabecera en base64 (generado)
   enacLogo.ts           Logo ENAC del pie en base64 (generado, no editar a mano)
 public/
   uc-logo.png           Logo mostrado en la web (provisional)
-  enac-logo.png         Logo de acreditación ENAC del pie del informe
+  laruc-logo.jpg        Logo LaRUC oficial de la cabecera del informe
+  enac-logo.jpg         Logo de acreditación ENAC del pie del informe
 scripts/
   make-logo.py          Genera el logo provisional (Pillow)
   embed-logo.mjs        Incrusta public/uc-logo.png en lib/ucLogo.ts
-  embed-enac.mjs        Incrusta public/enac-logo.png en lib/enacLogo.ts
+  embed-laruc.mjs       Incrusta public/laruc-logo.jpg en lib/larucLogo.ts
+  embed-enac.mjs        Incrusta public/enac-logo.jpg en lib/enacLogo.ts
   make-sample.mjs       Crea samples/ejemplo.xlsx para pruebas
   inspect-excel.mjs     Inspector: imprime hojas y contenido de un Excel
   make-guia.mjs         Genera docs/Guia-de-uso.docx (guía para el cliente)
@@ -125,16 +127,16 @@ También puede desplegarse desde terminal con `npx vercel`.
 
 ## Logotipos del informe
 
-- **Cabecera (LaRUC):** se compone como texto en `lib/word.ts` porque el logo
-  oficial es un EMF que `docx` no puede incrustar. Si dispones de un PNG del
-  logotipo LaRUC, puede añadirse de forma análoga al de ENAC (ver abajo).
+- **Cabecera (LaRUC):** el logo oficial va incrustado en `lib/larucLogo.ts`.
+  Para cambiarlo, sustituye `public/laruc-logo.jpg` y ejecuta
+  `npm run embed-laruc`.
 - **Pie (ENAC):** el logo de acreditación va incrustado en `lib/enacLogo.ts`.
-  Para cambiarlo, sustituye `public/enac-logo.png` y ejecuta
+  Para cambiarlo, sustituye `public/enac-logo.jpg` y ejecuta
   `npm run embed-enac`.
 - **Logo UC de la web:** sustituye `public/uc-logo.png` y ejecuta
   `npm run embed-logo` (regenera `lib/ucLogo.ts`).
 
-Tras cambiar cualquier logo, haz commit del PNG y del `.ts` regenerado.
+Tras cambiar cualquier logo, haz commit del archivo de imagen y del `.ts` regenerado.
 
 ## Límites actuales
 

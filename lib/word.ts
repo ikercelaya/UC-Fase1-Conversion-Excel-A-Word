@@ -22,23 +22,25 @@ import {
   WidthType,
 } from "docx";
 import { MAX_ROWS_PER_SHEET, RadonData, RadonSample, SheetData, WorkbookData } from "./excel";
-import { ENAC_LOGO_BASE64, ENAC_LOGO_NATURAL } from "./enacLogo";
+import { ENAC_LOGO_BASE64, ENAC_LOGO_TYPE } from "./enacLogo";
+import { LARUC_LOGO_BASE64, LARUC_LOGO_TYPE } from "./larucLogo";
 
 // Paleta corporativa
 const UC_TEAL = "0D9AA9";
-const INK = "1D2B32";
+const INK = "000000";
 const MUTED = "6B7A82";
 const LINE = "C7D2D7";
 const ZEBRA = "F2F7F8";
 
-// Logo ENAC del pie (px)
-const ENAC_HEIGHT = 54;
-const ENAC_WIDTH = Math.round((ENAC_LOGO_NATURAL.width / ENAC_LOGO_NATURAL.height) * ENAC_HEIGHT);
+// Logos del informe (px). Equivalen a los tamaños de la plantilla oficial.
+const LARUC_LOGO_WIDTH = 206;
+const LARUC_LOGO_HEIGHT = 84;
+const ENAC_LOGO_SIZE = 103;
 
 // A4 en twips
 const A4 = { width: 11906, height: 16838 };
-const MARGIN = { left: 1100, right: 1100 };
-const CONTENT_WIDTH = A4.width - MARGIN.left - MARGIN.right; // 9706
+const MARGIN = { top: 1417, right: 1701, bottom: 1417, left: 1701, header: 708, footer: 708 };
+const CONTENT_WIDTH = A4.width - MARGIN.left - MARGIN.right; // 8504
 
 /** A partir de este número de columnas el volcado se genera en horizontal. */
 const LANDSCAPE_COLUMN_THRESHOLD = 7;
@@ -87,7 +89,7 @@ function documentStyles() {
   return {
     default: {
       document: {
-        run: { font: "Arial", size: 20, color: INK }, // 10 pt
+        run: { font: "Arial", size: 24, color: INK }, // 12 pt
       },
       heading1: {
         run: { font: "Arial", size: 26, bold: true, color: UC_TEAL },
@@ -137,7 +139,7 @@ function buildRadonSection(file: CombinedReportFile): ISectionOptions {
     properties: {
       page: {
         size: { width: A4.width, height: A4.height, orientation: PageOrientation.PORTRAIT },
-        margin: { top: 2350, bottom: 1500, left: MARGIN.left, right: MARGIN.right, header: 460, footer: 360 },
+        margin: MARGIN,
         pageNumbers: { start: 1 }, // cada informe numera sus páginas desde 1
       },
     },
@@ -161,13 +163,13 @@ function buildRadonSection(file: CombinedReportFile): ISectionOptions {
 /** Cabecera de página: marca LaRUC (izq.) y datos del laboratorio + nº de informe (der.). */
 function buildHeader(reportNumber: string): Header {
   const right = (runs: TextRun[]) =>
-    new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 0, line: 200 }, children: runs });
+    new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { after: 0, line: 180 }, children: runs });
 
   return new Header({
     children: [
       new Table({
         width: { size: CONTENT_WIDTH, type: WidthType.DXA },
-        columnWidths: [4600, CONTENT_WIDTH - 4600],
+        columnWidths: [3300, CONTENT_WIDTH - 3300],
         layout: TableLayoutType.FIXED,
         borders: noBorders(),
         rows: [
@@ -176,21 +178,39 @@ function buildHeader(reportNumber: string): Header {
               new TableCell({
                 borders: noBorders(),
                 verticalAlign: VerticalAlign.TOP,
-                children: larucWordmark(),
+                children: [
+                  new Paragraph({
+                    spacing: { after: 0 },
+                    children: [
+                      new ImageRun({
+                        type: LARUC_LOGO_TYPE,
+                        data: Buffer.from(LARUC_LOGO_BASE64, "base64"),
+                        transformation: { width: LARUC_LOGO_WIDTH, height: LARUC_LOGO_HEIGHT },
+                        altText: {
+                          title: "LaRUC",
+                          description: "Laboratorio de Radiactividad Ambiental de la Universidad de Cantabria",
+                          name: "Logo LaRUC",
+                        },
+                      }),
+                    ],
+                  }),
+                ],
               }),
               new TableCell({
                 borders: noBorders(),
                 verticalAlign: VerticalAlign.TOP,
                 children: [
                   right([
-                    new TextRun({ text: "Página ", size: 14, color: MUTED }),
-                    new TextRun({ children: [PageNumber.CURRENT], size: 14, color: MUTED }),
-                    new TextRun({ text: " de ", size: 14, color: MUTED }),
-                    new TextRun({ children: [PageNumber.TOTAL_PAGES_IN_SECTION], size: 14, color: MUTED }),
+                    new TextRun({ text: "Página ", size: 16, color: INK }),
+                    new TextRun({ children: [PageNumber.CURRENT], bold: true, size: 16, color: INK }),
+                    new TextRun({ text: " de ", size: 16, color: INK }),
+                    new TextRun({ children: [PageNumber.TOTAL_PAGES_IN_SECTION], bold: true, size: 16, color: INK }),
                   ]),
-                  ...LAB_DEPT_LINES.map((line) => right([new TextRun({ text: line, size: 14, color: MUTED })])),
+                  ...LAB_DEPT_LINES.map((line) =>
+                    right([new TextRun({ text: line, bold: true, size: 16, color: INK })]),
+                  ),
                   right([
-                    new TextRun({ text: `Nº DE INFORME: ${reportNumber || "—"}`, bold: true, size: 19, color: INK }),
+                    new TextRun({ text: `Nº DE INFORME: ${reportNumber || ""}`, bold: true, size: 24, color: INK }),
                   ]),
                 ],
               }),
@@ -198,55 +218,24 @@ function buildHeader(reportNumber: string): Header {
           }),
         ],
       }),
-      new Paragraph({
-        spacing: { before: 40, after: 0 },
-        border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: UC_TEAL, space: 1 } },
-        children: [],
-      }),
     ],
   });
 }
 
-/** Marca textual "LaRUC" (el logotipo oficial es un EMF que se puede sustituir luego). */
-function larucWordmark(): Paragraph[] {
-  return [
-    new Paragraph({
-      spacing: { after: 0 },
-      children: [
-        new TextRun({ text: "La", bold: true, size: 40, color: MUTED }),
-        new TextRun({ text: "RUC", bold: true, size: 40, color: UC_TEAL }),
-      ],
-    }),
-    new Paragraph({
-      spacing: { before: 0, after: 0, line: 180 },
-      children: [new TextRun({ text: "Laboratorio de Radiactividad Ambiental", size: 13, color: MUTED })],
-    }),
-    new Paragraph({
-      spacing: { before: 0, after: 0, line: 180 },
-      children: [new TextRun({ text: "Universidad de Cantabria", size: 13, color: MUTED })],
-    }),
-  ];
-}
-
-/** Pie de página: logo ENAC (izq.) y nota legal (der.). */
+/** Pie de página: nota legal (izq.) y logo ENAC (der.). */
 function buildFooter(): Footer {
   const legal = (text: string) =>
     new Paragraph({
       alignment: AlignmentType.LEFT,
-      spacing: { after: 20, line: 180 },
-      children: [new TextRun({ text, size: 13, color: MUTED })],
+      spacing: { after: 0, line: 180 },
+      children: [new TextRun({ text, bold: true, size: 16, color: INK })],
     });
 
   return new Footer({
     children: [
-      new Paragraph({
-        spacing: { before: 0, after: 40 },
-        border: { top: { style: BorderStyle.SINGLE, size: 4, color: LINE, space: 1 } },
-        children: [],
-      }),
       new Table({
         width: { size: CONTENT_WIDTH, type: WidthType.DXA },
-        columnWidths: [1250, CONTENT_WIDTH - 1250],
+        columnWidths: [CONTENT_WIDTH - 1604, 1604],
         layout: TableLayoutType.FIXED,
         borders: noBorders(),
         rows: [
@@ -255,13 +244,20 @@ function buildFooter(): Footer {
               new TableCell({
                 borders: noBorders(),
                 verticalAlign: VerticalAlign.CENTER,
+                children: [legal(FOOTER_LINE_1), legal(FOOTER_LINE_2)],
+              }),
+              new TableCell({
+                borders: noBorders(),
+                verticalAlign: VerticalAlign.CENTER,
                 children: [
                   new Paragraph({
+                    alignment: AlignmentType.RIGHT,
+                    spacing: { after: 0 },
                     children: [
                       new ImageRun({
-                        type: "png",
+                        type: ENAC_LOGO_TYPE,
                         data: Buffer.from(ENAC_LOGO_BASE64, "base64"),
-                        transformation: { width: ENAC_WIDTH, height: ENAC_HEIGHT },
+                        transformation: { width: ENAC_LOGO_SIZE, height: ENAC_LOGO_SIZE },
                         altText: {
                           title: "ENAC",
                           description: "Acreditación ENAC Nº 1204/LE2219",
@@ -271,11 +267,6 @@ function buildFooter(): Footer {
                     ],
                   }),
                 ],
-              }),
-              new TableCell({
-                borders: noBorders(),
-                verticalAlign: VerticalAlign.CENTER,
-                children: [legal(FOOTER_LINE_1), legal(FOOTER_LINE_2)],
               }),
             ],
           }),
@@ -288,23 +279,29 @@ function buildFooter(): Footer {
 /** Página 1: portada con solo el título (centrado), debajo de la cabecera. */
 function buildTitlePage(): Paragraph[] {
   return [
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      spacing: { before: 1400, after: 80 },
-      children: [new TextRun({ text: "INFORME DE ENSAYO", bold: true, size: 36, color: INK })],
-    }),
+    new Paragraph({ children: [] }),
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { after: 0 },
+      children: [new TextRun({ text: "INFORME DE ENSAYO", bold: true })],
+    }),
+    new Paragraph({
+      alignment: AlignmentType.JUSTIFIED,
+      spacing: { after: 0 },
+      children: [],
+    }),
+    new Paragraph({
+      alignment: AlignmentType.JUSTIFIED,
+      indent: { left: 720 },
       children: [
-        new TextRun({
-          text: "DETERMINACIÓN DE LA CONCENTRACIÓN DE RADÓN EN AIRE",
-          bold: true,
-          size: 24,
-          color: UC_TEAL,
-        }),
+        new TextRun({ text: "DETERMINACIÓN ", bold: true }),
+        new TextRun({ text: "de la", bold: true, allCaps: true }),
+        new TextRun({ text: " ", bold: true, allCaps: true }),
+        new TextRun({ text: "CONCENTRACIÓN DE ", bold: true, allCaps: true }),
+        new TextRun({ text: "radón en aire", bold: true, allCaps: true }),
       ],
     }),
+    new Paragraph({ alignment: AlignmentType.JUSTIFIED, indent: { left: 360 }, children: [] }),
   ];
 }
 
@@ -617,7 +614,7 @@ function buildVolcadoSection(file: CombinedReportFile): ISectionOptions {
         size: landscape
           ? { width: A4.height, height: A4.width, orientation: PageOrientation.LANDSCAPE }
           : { width: A4.width, height: A4.height, orientation: PageOrientation.PORTRAIT },
-        margin: { top: 2350, bottom: 1500, left: MARGIN.left, right: MARGIN.right, header: 460, footer: 360 },
+        margin: MARGIN,
         pageNumbers: { start: 1 },
       },
     },
