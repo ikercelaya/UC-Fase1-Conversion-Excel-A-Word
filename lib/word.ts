@@ -160,12 +160,13 @@ function buildRadonSection(files: CombinedReportFile[], cliente: ReportClient, n
     footers: { default: buildFooter() },
     children: [
       // Página 1: solo el título (portada). El resto va en la página 2.
-      ...buildTitlePage(),
+      ...buildTitlePage(cliente),
       // Página 2 en adelante: datos del informe, tablas y cierre con firma.
       ...buildDataPage(cliente, normativa),
       ...buildResultsIntro(cliente),
       ...samples.flatMap((sample, index) => [
-        buildSampleTable(sample, referenciaUC(reportNumber, index + 1)),
+        ...(index > 0 ? [new Paragraph({ pageBreakBefore: true, children: [] })] : []),
+        buildSampleTable(sample, referenciaUC(reportNumber, index + 1), cliente),
         new Paragraph({ spacing: { before: 120, after: 120 }, children: [] }),
       ]),
       ...buildClosing(),
@@ -307,7 +308,9 @@ function buildFooter(): Footer {
 }
 
 /** Página 1: portada con solo el título (centrado), debajo de la cabecera. */
-function buildTitlePage(): Paragraph[] {
+function buildTitlePage(cliente: ReportClient): Paragraph[] {
+  const titleMetric = cliente === "Externo" ? "EXPOSICIÓN DE " : "CONCENTRACIÓN DE ";
+
   return [
     new Paragraph({ children: [] }),
     new Paragraph({ children: [] }),
@@ -329,7 +332,7 @@ function buildTitlePage(): Paragraph[] {
         new TextRun({ text: "DETERMINACIÓN ", bold: true }),
         new TextRun({ text: "de la", bold: true, allCaps: true }),
         new TextRun({ text: " ", bold: true, allCaps: true }),
-        new TextRun({ text: "CONCENTRACIÓN DE ", bold: true, allCaps: true }),
+        new TextRun({ text: titleMetric, bold: true, allCaps: true }),
         new TextRun({ text: "radón en aire", bold: true, allCaps: true }),
       ],
     }),
@@ -430,29 +433,40 @@ function buildExternalDataPage(normativa: string): Paragraph[] {
     dataItem("Nº de medidas realizadas:", "xx"),
 
     dataSectionHeading("Datos de las muestras objeto del ensayo"),
-    dataItem("Los detectores han sido colocados por", "CLIENTE (1)"),
-    dataItem("Los detectores han sido recogidos por", "CLIENTE (1)"),
+    dataItem("Los detectores han sido colocados por", [dataTextRun("CLIENTE "), ...referenceMarkRuns("1")]),
+    dataItem("Los detectores han sido recogidos por", [dataTextRun("CLIENTE "), ...referenceMarkRuns("1")]),
     dataItem("Los detectores han sido aptos para su ensayo", "Sí"),
     dataPlainIndented(
       "Para llevar a cabo la medida se informa al cliente mediante una instrucción (folleto) de la manera idónea de colocación en caso de que sea el interesado el que coloca los detectores.",
       true,
     ),
-    dataItem("Lugar de colocación del detector/es:", "(1)"),
-    dataItem("Fecha de colocación del detector/es:", "xx/xx/xxxx (1)"),
-    dataItem("Fecha de retirada del detector/es:", "xx/xx/xxxx (1)"),
+    dataItem("Lugar de colocación del detector/es:", referenceMarkRuns("1")),
+    dataItem("Fecha de colocación del detector/es:", [
+      dataTextRun("ver fecha de cada detector "),
+      ...referenceMarkRuns("1"),
+    ]),
+    dataItem("Fecha de retirada del detector/es:", [
+      dataTextRun("ver fecha de cada detector "),
+      ...referenceMarkRuns("1"),
+    ]),
     dataItem("Fecha de recepción en el laboratorio:", "xx/xx/xxxx"),
     dataItem("Fecha inicio ensayo:", "xx/xx/xxxx"),
     dataItem("Fecha final ensayo:", "xx/xx/xxxx"),
     dataPlainIndented(
-      "(1) El laboratorio no es responsable de la información aportada por el cliente relativa a la colocación, retirada y fechas relacionadas, que no está cubierta por la acreditación.",
-      true,
+      [
+        ...referenceMarkRuns("1", true),
+        dataTextRun(
+          " El laboratorio no es responsable de la información aportada por el cliente relativa a la colocación, retirada y fechas relacionadas, que no está cubierta por la acreditación.",
+          true,
+        ),
+      ],
     ),
 
     dataSectionHeading("Método de ensayo"),
     dataItem("Lugar de realización del ensayo:", "Instalaciones de LaRUC"),
     dataItem(
       "Método de ensayo empleado:",
-      "El método empleado ha sido el que se recoge en la documentación de calidad del laboratorio referencia I-Ens01_10.",
+      "El método empleado ha sido el que se recoge en la documentación de calidad del laboratorio referencia I-Ens01_11.",
     ),
 
     dataSectionHeading("Normativa que afecta a este ensayo"),
@@ -494,12 +508,12 @@ function dataItem(label: string, value: string | TextRun[] = ""): Paragraph {
   });
 }
 
-function dataPlainIndented(text: string, bold = false): Paragraph {
+function dataPlainIndented(text: string | TextRun[], bold = false): Paragraph {
   return new Paragraph({
     alignment: AlignmentType.JUSTIFIED,
     indent: { left: 920 },
     spacing: { after: 30, line: 240 },
-    children: [dataTextRun(text, bold)],
+    children: Array.isArray(text) ? text : [dataTextRun(text, bold)],
   });
 }
 
@@ -540,11 +554,18 @@ function buildResultsIntro(cliente: ReportClient): Paragraph[] {
             ],
             120,
           ),
-          resultsParagraph([textRun("(1) La información ha sido proporcionada por el cliente.", true)], 80),
           resultsParagraph(
             [
+              ...referenceMarkRuns("1", true),
+              textRun(" La información ha sido proporcionada por el cliente.", true),
+            ],
+            80,
+          ),
+          resultsParagraph(
+            [
+              ...referenceMarkRuns("2", true),
               textRun(
-                "(2) El resultado de la concentración se ha calculado según las fechas de exposición facilitadas por el cliente.",
+                " El resultado de la concentración se ha calculado según las fechas de exposición facilitadas por el cliente.",
                 true,
               ),
             ],
@@ -557,6 +578,14 @@ function buildResultsIntro(cliente: ReportClient): Paragraph[] {
 
 function textRun(text: string, bold = false): TextRun {
   return new TextRun({ text, font: "Arial", bold, size: 20, color: INK });
+}
+
+function referenceMarkRuns(number: "1" | "2", bold = false): TextRun[] {
+  return [
+    new TextRun({ text: "(", font: "Arial", bold, size: 20, color: INK }),
+    new TextRun({ text: number, font: "Arial", bold, size: 20, color: INK, superScript: true }),
+    new TextRun({ text: ")", font: "Arial", bold, size: 20, color: INK }),
+  ];
 }
 
 function resultsIntroRuns(): TextRun[] {
@@ -668,7 +697,9 @@ function referenciaUC(reportNumber: string, position: number): string {
 }
 
 /** Tabla de un detector con la misma estructura que el informe del laboratorio. */
-function buildSampleTable(sample: RadonSample, refUC: string): Table {
+function buildSampleTable(sample: RadonSample, refUC: string, cliente: ReportClient): Table {
+  const isExternal = cliente === "Externo";
+
   return new Table({
     width: { size: RADON_TABLE_WIDTH, type: WidthType.DXA },
     columnWidths: RADON_COLUMNS,
@@ -683,29 +714,29 @@ function buildSampleTable(sample: RadonSample, refUC: string): Table {
       insideVertical: { style: BorderStyle.SINGLE, size: 4, color: INK },
     },
     rows: [
-      labelValueRow("PROCEDENCIA", [], true),
+      labelValueRow("PROCEDENCIA", isExternal ? referenceMarkRuns("1") : [], true),
       labelValueRow("REFERENCIA", valueRuns(sample.id, true), true),
       labelValueRow("REFERENCIA UC", valueRuns(refUC), true),
-      labelValueRow("FECHA COLOCACIÓN", valueRuns(sample.fechaColocacion), true),
-      labelValueRow("FECHA RETIRADA", valueRuns(sample.fechaRetirada), true),
+      labelValueRow("FECHA COLOCACIÓN", valueRuns(sample.fechaColocacion, false, isExternal ? "1" : undefined), true),
+      labelValueRow("FECHA RETIRADA", valueRuns(sample.fechaRetirada, false, isExternal ? "1" : undefined), true),
       pairRow(
         ["EXPOSICIÓN", expUnitRuns()],
         sample.exposicion,
-        ["CONCENTRACIÓN", concUnitRuns()],
+        ["CONCENTRACIÓN", concUnitRuns(isExternal ? "2" : undefined)],
         sample.concentracion,
         true,
       ),
       pairRow(
         ["INCERTIDUMBRE", expUnitRuns()],
         sample.incertidumbreExposicion,
-        ["INCERTIDUMBRE", concUnitRuns()],
+        ["INCERTIDUMBRE", concUnitRuns(isExternal ? "2" : undefined)],
         sample.incertidumbreConcentracion,
         true,
       ),
       pairRow(
         ["L.D.", expUnitRuns()],
         sample.ldExposicion,
-        ["L.D.", concUnitRuns()],
+        ["L.D.", concUnitRuns(isExternal ? "2" : undefined)],
         sample.ldConcentracion,
         false,
       ),
@@ -723,12 +754,19 @@ function expUnitRuns(): TextRun[] {
 }
 
 /** Unidades de concentración: (Bq m⁻³). */
-function concUnitRuns(): TextRun[] {
-  return [new TextRun({ text: "(Bq m", font: "Arial", size: 20 }), sup("-3"), new TextRun({ text: ")", font: "Arial", size: 20 })];
+function concUnitRuns(reference?: "2"): TextRun[] {
+  return [
+    new TextRun({ text: "(Bq m", font: "Arial", size: 20 }),
+    sup("-3"),
+    new TextRun({ text: ")", font: "Arial", size: 20 }),
+    ...(reference ? referenceMarkRuns(reference) : []),
+  ];
 }
 
-function valueRuns(value: string, bold = false): TextRun[] {
-  return value ? [new TextRun({ text: value, font: "Arial", bold, size: 20, color: INK })] : [];
+function valueRuns(value: string, bold = false, reference?: "1" | "2"): TextRun[] {
+  const runs = value ? [new TextRun({ text: value, font: "Arial", bold, size: 20, color: INK })] : [];
+  if (reference) runs.push(...referenceMarkRuns(reference, bold));
+  return runs;
 }
 
 function radonParagraph(
