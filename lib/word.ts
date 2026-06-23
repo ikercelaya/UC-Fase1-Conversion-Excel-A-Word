@@ -582,10 +582,14 @@ function textRun(text: string, bold = false): TextRun {
 
 function referenceMarkRuns(number: "1" | "2", bold = false): TextRun[] {
   return [
-    new TextRun({ text: "(", font: "Arial", bold, size: 20, color: INK }),
+    new TextRun({ text: "(", font: "Arial", bold, size: 20, color: INK, superScript: true }),
     new TextRun({ text: number, font: "Arial", bold, size: 20, color: INK, superScript: true }),
-    new TextRun({ text: ")", font: "Arial", bold, size: 20, color: INK }),
+    new TextRun({ text: ")", font: "Arial", bold, size: 20, color: INK, superScript: true }),
   ];
+}
+
+function spacedReferenceMarkRuns(number: "1" | "2", bold = false): TextRun[] {
+  return [new TextRun({ text: " ", font: "Arial", bold, size: 20, color: INK }), ...referenceMarkRuns(number, bold)];
 }
 
 function resultsIntroRuns(): TextRun[] {
@@ -759,13 +763,13 @@ function concUnitRuns(reference?: "2"): TextRun[] {
     new TextRun({ text: "(Bq m", font: "Arial", size: 20 }),
     sup("-3"),
     new TextRun({ text: ")", font: "Arial", size: 20 }),
-    ...(reference ? referenceMarkRuns(reference) : []),
+    ...(reference ? spacedReferenceMarkRuns(reference) : []),
   ];
 }
 
 function valueRuns(value: string, bold = false, reference?: "1" | "2"): TextRun[] {
   const runs = value ? [new TextRun({ text: value, font: "Arial", bold, size: 20, color: INK })] : [];
-  if (reference) runs.push(...referenceMarkRuns(reference, bold));
+  if (reference) runs.push(...(runs.length > 0 ? spacedReferenceMarkRuns(reference, bold) : referenceMarkRuns(reference, bold)));
   return runs;
 }
 
