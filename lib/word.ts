@@ -403,7 +403,7 @@ function buildLarucDataPage(normativa: string): Paragraph[] {
     dataItem("Lugar de realización del ensayo:", "Instalaciones de LaRUC"),
     dataItem(
       "Método de ensayo empleado:",
-      "El método empleado ha sido el que se recoge en la documentación de calidad del laboratorio referencia I-Ens01_10.",
+      "El método empleado ha sido el que se recoge en la documentación de calidad del laboratorio referencia I-Ens01_11.",
     ),
 
     dataSectionHeading("Normativa que afecta a este ensayo"),
