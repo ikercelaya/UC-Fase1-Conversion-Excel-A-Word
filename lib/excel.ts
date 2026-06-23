@@ -104,6 +104,8 @@ function toCellText(value: unknown): string {
 
 /** Identificador de detector, p. ej. HK3287 o HH8401. Excluye huecos ("0"). */
 const DETECTOR_ID = /^[A-Za-z]{1,4}\d{2,6}$/;
+const RESULT_TABLE_START_COLUMN = XLSX.utils.decode_col("J");
+const RESULT_TABLE_END_COLUMN = XLSX.utils.decode_col("U");
 
 export interface RadonSample {
   /** Referencia UC/expediente del informe, p. ej. P-25002-TRA-1. */
@@ -149,6 +151,11 @@ interface MeasurementColumnMap {
   measureColumns: number[];
 }
 
+interface ResultTableBounds {
+  start: number;
+  end: number;
+}
+
 /**
  * Busca en el libro los bloques de resultados de detectores de radón.
  * Devuelve null si el archivo no tiene ese formato.
@@ -181,6 +188,8 @@ export function extractRadonSamples(buffer: Buffer): RadonData | null {
       defval: null,
       blankrows: true,
     });
+    const resultTableBounds = getResultTableBounds(worksheet);
+    if (!resultTableBounds) continue;
 
     const samples: RadonSample[] = [];
     let columns: ColumnMap | null = null;
@@ -189,10 +198,13 @@ export function extractRadonSamples(buffer: Buffer): RadonData | null {
     for (let r = 0; r < formatted.length; r++) {
       const row = (formatted[r] ?? []).map((cell) => String(cell ?? "").trim());
 
-      const headerColumns = findColumns(row);
+      const headerColumns = findColumns(row, resultTableBounds);
       if (headerColumns) {
         columns = headerColumns;
-        slide = row.find((cell) => /^SLIDE/i.test(cell)) ?? slide;
+        slide =
+          row
+            .slice(resultTableBounds.start, resultTableBounds.end + 1)
+            .find((cell) => /^SLIDE/i.test(cell)) ?? slide;
         continue;
       }
       if (!columns) continue;
@@ -296,6 +308,24 @@ function sheetPriority(name: string): number {
   return /resultado/i.test(name) ? 1 : 0;
 }
 
+function getResultTableBounds(worksheet: XLSX.WorkSheet): ResultTableBounds | null {
+  const ref = worksheet["!ref"];
+  if (!ref) return null;
+
+  const range = XLSX.utils.decode_range(ref);
+  const start = RESULT_TABLE_START_COLUMN - range.s.c;
+  const end = RESULT_TABLE_END_COLUMN - range.s.c;
+
+  if (end < 0 || start > range.e.c - range.s.c) {
+    return null;
+  }
+
+  return {
+    start: Math.max(0, start),
+    end: Math.min(range.e.c - range.s.c, end),
+  };
+}
+
 /** Quita acentos, colapsa espacios y pasa a mayúsculas para comparar encabezados. */
 function normalizeHeader(text: string): string {
   return text
@@ -307,19 +337,25 @@ function normalizeHeader(text: string): string {
 }
 
 /**
- * Detecta una fila de encabezado del bloque de resultados. Las columnas se
- * buscan a partir de la columna ID para ignorar bloques auxiliares que
- * comparten fila (p. ej. "RESULTADOS HOJA DE CÁLCULO" a la izquierda).
+ * Detecta una fila de encabezado del bloque de resultados para informe.
+ * Solo considera la tabla verde de la derecha en Resultados!J:U.
  */
-function findColumns(row: string[]): ColumnMap | null {
+function findColumns(row: string[], bounds: ResultTableBounds): ColumnMap | null {
   const headers = row.map(normalizeHeader);
-  const idIndex = headers.findIndex((header) => header === "ID");
+  const findInBounds = (predicate: (header: string) => boolean) => {
+    for (let i = bounds.start; i <= bounds.end; i++) {
+      if (predicate(headers[i] ?? "")) return i;
+    }
+    return -1;
+  };
+
+  const idIndex = findInBounds((header) => header === "ID");
   if (idIndex < 0) return null;
 
-  const anywhere = (predicate: (header: string) => boolean) => headers.findIndex(predicate);
+  const anywhere = findInBounds;
   const after = (predicate: (header: string) => boolean) => {
-    for (let i = idIndex + 1; i < headers.length; i++) {
-      if (predicate(headers[i])) return i;
+    for (let i = idIndex + 1; i <= bounds.end; i++) {
+      if (predicate(headers[i] ?? "")) return i;
     }
     return -1;
   };
