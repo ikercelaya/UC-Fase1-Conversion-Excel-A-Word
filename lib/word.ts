@@ -147,7 +147,7 @@ export async function buildCombinedReport({
 
 function buildRadonSection(files: CombinedReportFile[], cliente: ReportClient, normativa: string): ISectionOptions {
   const reportNumber = files.find((file) => file.reportNumber)?.reportNumber ?? "";
-  const samples = files.flatMap((file) => file.radon?.samples ?? []);
+  const samples = sortAndDedupeSamples(files.flatMap((file) => file.radon?.samples ?? []));
   return {
     properties: {
       page: {
@@ -166,7 +166,7 @@ function buildRadonSection(files: CombinedReportFile[], cliente: ReportClient, n
       ...buildResultsIntro(cliente),
       ...samples.flatMap((sample, index) => [
         ...(index > 0 ? [new Paragraph({ pageBreakBefore: true, children: [] })] : []),
-        buildSampleTable(sample, referenciaUC(reportNumber, index + 1), cliente),
+        buildSampleTable(sample, sample.expediente || referenciaUC(reportNumber, index + 1), cliente),
         new Paragraph({ spacing: { before: 120, after: 120 }, children: [] }),
       ]),
       ...buildClosing(),
@@ -517,6 +517,40 @@ function dataPlainIndented(text: string | TextRun[], bold = false): Paragraph {
   });
 }
 
+function sortAndDedupeSamples(samples: RadonSample[]): RadonSample[] {
+  const byExpediente = new Map<string, RadonSample>();
+  const withoutExpediente: RadonSample[] = [];
+
+  for (const sample of samples) {
+    const expediente = sample.expediente.trim();
+    if (!expediente) {
+      withoutExpediente.push(sample);
+      continue;
+    }
+
+    if (!byExpediente.has(expediente)) {
+      byExpediente.set(expediente, sample);
+    }
+  }
+
+  return [...byExpediente.values()]
+    .sort(compareSamplesByExpediente)
+    .concat(withoutExpediente);
+}
+
+function compareSamplesByExpediente(a: RadonSample, b: RadonSample): number {
+  const aOrder = expedienteOrder(a.expediente);
+  const bOrder = expedienteOrder(b.expediente);
+
+  if (aOrder !== bOrder) return aOrder - bOrder;
+  return a.expediente.localeCompare(b.expediente, "es", { numeric: true, sensitivity: "base" });
+}
+
+function expedienteOrder(expediente: string): number {
+  const match = expediente.match(/TRA-(\d+)\s*$/i);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
 function highlightedDataItem(text: string): Paragraph {
   return new Paragraph({
     indent: { left: 360 },
@@ -718,7 +752,11 @@ function buildSampleTable(sample: RadonSample, refUC: string, cliente: ReportCli
       insideVertical: { style: BorderStyle.SINGLE, size: 4, color: INK },
     },
     rows: [
-      labelValueRow("PROCEDENCIA", isExternal ? referenceMarkRuns("1") : [], true),
+      labelValueRow(
+        "PROCEDENCIA",
+        sample.procedencia ? valueRuns(sample.procedencia, false, isExternal ? "1" : undefined) : isExternal ? referenceMarkRuns("1") : [],
+        true,
+      ),
       labelValueRow("REFERENCIA", valueRuns(sample.id, true), true),
       labelValueRow("REFERENCIA UC", valueRuns(refUC), true),
       labelValueRow("FECHA COLOCACIÓN", valueRuns(sample.fechaColocacion, false, isExternal ? "1" : undefined), true),

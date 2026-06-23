@@ -106,7 +106,11 @@ function toCellText(value: unknown): string {
 const DETECTOR_ID = /^[A-Za-z]{1,4}\d{2,6}$/;
 
 export interface RadonSample {
+  /** Referencia UC/expediente del informe, p. ej. P-25002-TRA-1. */
+  expediente: string;
   id: string;
+  /** Procedencia declarada en el bloque "RESULTADOS PARA INFORME". */
+  procedencia: string;
   /** Bloque del que procede (p. ej. "SLIDE 1"), informativo. */
   slide: string;
   fechaColocacion: string;
@@ -125,7 +129,9 @@ export interface RadonData {
 }
 
 interface ColumnMap {
+  expediente: number;
   id: number;
+  procedencia: number;
   diaInicial: number;
   diaFinal: number;
   exposicion: number;
@@ -192,7 +198,9 @@ export function extractRadonSamples(buffer: Buffer): RadonData | null {
         index >= 0 ? formatFecha(rawRow[index], row[index] ?? "") : "";
 
       samples.push({
+        expediente: normalizeOptionalText(text(columns.expediente)),
         id,
+        procedencia: normalizeOptionalText(text(columns.procedencia)),
         slide,
         fechaColocacion: fecha(columns.diaInicial),
         fechaRetirada: fecha(columns.diaFinal),
@@ -237,6 +245,7 @@ function findColumns(row: string[]): ColumnMap | null {
   const idIndex = headers.findIndex((header) => header === "ID");
   if (idIndex < 0) return null;
 
+  const anywhere = (predicate: (header: string) => boolean) => headers.findIndex(predicate);
   const after = (predicate: (header: string) => boolean) => {
     for (let i = idIndex + 1; i < headers.length; i++) {
       if (predicate(headers[i])) return i;
@@ -245,7 +254,10 @@ function findColumns(row: string[]): ColumnMap | null {
   };
 
   const map: ColumnMap = {
+    // Algunos libros historicos tienen el encabezado escrito como "EXPEDENTE".
+    expediente: anywhere((h) => h === "EXPEDIENTE" || h === "EXPEDENTE"),
     id: idIndex,
+    procedencia: after((h) => h === "PROCEDENCIA"),
     diaInicial: after((h) => h.startsWith("DIA INICIAL")),
     diaFinal: after((h) => h.startsWith("DIA FINAL")),
     exposicion: after((h) => h.startsWith("EXPOSICION")),
@@ -261,6 +273,11 @@ function findColumns(row: string[]): ColumnMap | null {
     return null;
   }
   return map;
+}
+
+function normalizeOptionalText(value: string): string {
+  const text = value.trim();
+  return text === "0" ? "" : text;
 }
 
 /** Devuelve la fecha en formato dd/mm/aaaa a partir del valor crudo o del texto. */
