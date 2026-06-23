@@ -111,6 +111,8 @@ export interface RadonSample {
   id: string;
   /** Procedencia declarada en el bloque "RESULTADOS PARA INFORME". */
   procedencia: string;
+  /** Nº de medidas tomadas para el expediente en la hoja "Medidas". */
+  measurementCount: number;
   /** Bloque del que procede (p. ej. "SLIDE 1"), informativo. */
   slide: string;
   fechaColocacion: string;
@@ -142,12 +144,18 @@ interface ColumnMap {
   ldConc: number;
 }
 
+interface MeasurementColumnMap {
+  expediente: number;
+  measureColumns: number[];
+}
+
 /**
  * Busca en el libro los bloques de resultados de detectores de radón.
  * Devuelve null si el archivo no tiene ese formato.
  */
 export function extractRadonSamples(buffer: Buffer): RadonData | null {
   const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  const measurementCounts = extractMeasurementCounts(workbook);
 
   // La hoja "Resultados" tiene prioridad: su bloque "RESULTADOS PARA INFORME"
   // contiene los L.D. del informe (otras hojas tienen valores intermedios).
@@ -201,6 +209,7 @@ export function extractRadonSamples(buffer: Buffer): RadonData | null {
         expediente: normalizeOptionalText(text(columns.expediente)),
         id,
         procedencia: normalizeOptionalText(text(columns.procedencia)),
+        measurementCount: measurementCounts.get(normalizeOptionalText(text(columns.expediente))) ?? 0,
         slide,
         fechaColocacion: fecha(columns.diaInicial),
         fechaRetirada: fecha(columns.diaFinal),
@@ -219,6 +228,68 @@ export function extractRadonSamples(buffer: Buffer): RadonData | null {
   }
 
   return null;
+}
+
+function extractMeasurementCounts(workbook: XLSX.WorkBook): Map<string, number> {
+  const counts = new Map<string, number>();
+  const sheetName = workbook.SheetNames.find((name) => /^medidas$/i.test(name.trim()));
+  const worksheet = sheetName ? workbook.Sheets[sheetName] : undefined;
+  if (!worksheet || !worksheet["!ref"]) return counts;
+
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(worksheet, {
+    header: 1,
+    raw: false,
+    defval: "",
+    blankrows: true,
+  });
+
+  let columns: MeasurementColumnMap | null = null;
+
+  for (const rawRow of rows) {
+    const row = (rawRow ?? []).map((cell) => String(cell ?? "").trim());
+    const headerColumns = findMeasurementColumns(row);
+    if (headerColumns) {
+      columns = headerColumns;
+      continue;
+    }
+    if (!columns) continue;
+
+    const expediente = normalizeOptionalText(row[columns.expediente] ?? "");
+    if (!expediente) continue;
+
+    const count = columns.measureColumns.reduce(
+      (total, column) => total + (isMeasurementValue(row[column]) ? 1 : 0),
+      0,
+    );
+    if (count > 0) {
+      counts.set(expediente, Math.max(counts.get(expediente) ?? 0, count));
+    }
+  }
+
+  return counts;
+}
+
+function findMeasurementColumns(row: string[]): MeasurementColumnMap | null {
+  const headers = row.map(normalizeHeader);
+  const expediente = headers.findIndex((header) => header === "EXPEDIENTE" || header === "EXPEDENTE");
+  if (expediente < 0) return null;
+
+  const nextSummary = headers.findIndex((header, index) => index > expediente && header === "STDEV");
+  const searchEnd = nextSummary > expediente ? nextSummary : row.length;
+  const measureColumns: number[] = [];
+
+  for (let index = expediente + 1; index < searchEnd; index++) {
+    if (/^\d+$/.test(headers[index])) {
+      measureColumns.push(index);
+    }
+  }
+
+  return measureColumns.length > 0 ? { expediente, measureColumns } : null;
+}
+
+function isMeasurementValue(value: string): boolean {
+  const text = value.trim();
+  return text !== "" && text !== "0" && !text.startsWith("#");
 }
 
 function sheetPriority(name: string): number {

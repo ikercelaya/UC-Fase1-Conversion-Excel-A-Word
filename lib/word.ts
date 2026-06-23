@@ -91,6 +91,11 @@ export interface CombinedReportInput {
 
 export type ReportClient = "LaRUC" | "Externo";
 
+type ReportMetrics = {
+  detectorCount: number;
+  measurementCount: number;
+};
+
 /** Estilos comunes a todos los informes. */
 function documentStyles() {
   return {
@@ -148,6 +153,7 @@ export async function buildCombinedReport({
 function buildRadonSection(files: CombinedReportFile[], cliente: ReportClient, normativa: string): ISectionOptions {
   const reportNumber = files.find((file) => file.reportNumber)?.reportNumber ?? "";
   const samples = sortAndDedupeSamples(files.flatMap((file) => file.radon?.samples ?? []));
+  const metrics = buildReportMetrics(samples);
   return {
     properties: {
       page: {
@@ -162,7 +168,7 @@ function buildRadonSection(files: CombinedReportFile[], cliente: ReportClient, n
       // Página 1: solo el título (portada). El resto va en la página 2.
       ...buildTitlePage(cliente),
       // Página 2 en adelante: datos del informe, tablas y cierre con firma.
-      ...buildDataPage(cliente, normativa),
+      ...buildDataPage(cliente, normativa, metrics),
       ...buildResultsIntro(cliente),
       ...samples.flatMap((sample, index) => [
         ...(index > 0 ? [new Paragraph({ pageBreakBefore: true, children: [] })] : []),
@@ -171,6 +177,13 @@ function buildRadonSection(files: CombinedReportFile[], cliente: ReportClient, n
       ]),
       ...buildClosing(),
     ],
+  };
+}
+
+function buildReportMetrics(samples: RadonSample[]): ReportMetrics {
+  return {
+    detectorCount: samples.length,
+    measurementCount: samples.reduce((total, sample) => total + sample.measurementCount, 0),
   };
 }
 
@@ -344,8 +357,10 @@ function buildTitlePage(cliente: ReportClient): Paragraph[] {
  * Página 2: datos del informe siguiendo la plantilla del laboratorio.
  * Los datos que no llegan desde el Excel se dejan como marcadores "xx".
  */
-function buildDataPage(cliente: ReportClient, normativa: string): Paragraph[] {
-  return cliente === "Externo" ? buildExternalDataPage(normativa) : buildLarucDataPage(normativa);
+function buildDataPage(cliente: ReportClient, normativa: string, metrics: ReportMetrics): Paragraph[] {
+  return cliente === "Externo"
+    ? buildExternalDataPage(normativa, metrics)
+    : buildLarucDataPage(normativa, metrics);
 }
 
 function dataPageTitle(text: string): Paragraph {
@@ -364,7 +379,7 @@ function dataPageTitle(text: string): Paragraph {
   });
 }
 
-function buildLarucDataPage(normativa: string): Paragraph[] {
+function buildLarucDataPage(normativa: string, metrics: ReportMetrics): Paragraph[] {
   return [
     dataPageTitle("DETERMINACIÓN de la CONCENTRACIÓN DE radón en aire."),
 
@@ -385,16 +400,16 @@ function buildLarucDataPage(normativa: string): Paragraph[] {
 
     dataSectionHeading("Objeto del informe"),
     dataItem("Ensayo a realizar:", ENSAYO_OBJETO),
-    dataItem("Nº de detectores:", "xx"),
-    dataItem("Nº de medidas realizadas:", "xx"),
+    dataItem("Nº de detectores:", String(metrics.detectorCount)),
+    dataItem("Nº de medidas realizadas:", String(metrics.measurementCount)),
 
     dataSectionHeading("Datos de las muestras objeto del ensayo"),
     dataItem("Los detectores han sido colocados por", "LaRUC"),
     dataItem("Los detectores han sido recogidos por", "LaRUC"),
     dataItem("Los detectores han sido aptos para su ensayo", "Sí"),
     dataItem("Lugar de colocación del detector/es:", "xx"),
-    dataItem("Fecha de colocación del detector/es:", "xx/xx/2025"),
-    dataItem("Fecha de retirada del detector/es:", "xx/xx/2025"),
+    dataItem("Fecha de colocación del detector/es:", "ver fecha de cada detector"),
+    dataItem("Fecha de retirada del detector/es:", "ver fecha de cada detector"),
     dataItem("Fecha de recepción en el laboratorio:", "xx/xx/2025"),
     dataItem("Fecha inicio ensayo:", "xx/xx/2025"),
     dataItem("Fecha final ensayo:", "xx/xx/2025"),
@@ -416,7 +431,7 @@ function buildLarucDataPage(normativa: string): Paragraph[] {
   ];
 }
 
-function buildExternalDataPage(normativa: string): Paragraph[] {
+function buildExternalDataPage(normativa: string, metrics: ReportMetrics): Paragraph[] {
   return [
     dataPageTitle("DETERMINACIÓN de la exposición de gas radón en aire."),
 
@@ -429,8 +444,8 @@ function buildExternalDataPage(normativa: string): Paragraph[] {
 
     dataSectionHeading("Objeto del informe"),
     dataItem("Ensayo a realizar:", ENSAYO_OBJETO_EXTERNO),
-    dataItem("Nº de detectores:", "xx"),
-    dataItem("Nº de medidas realizadas:", "xx"),
+    dataItem("Nº de detectores:", String(metrics.detectorCount)),
+    dataItem("Nº de medidas realizadas:", String(metrics.measurementCount)),
 
     dataSectionHeading("Datos de las muestras objeto del ensayo"),
     dataItem("Los detectores han sido colocados por", [dataTextRun("CLIENTE "), ...referenceMarkRuns("1")]),
